@@ -1,0 +1,3 @@
+[workspace]
+  members = ["kinetrs", "lsserver"]
+  resolver = "3"
