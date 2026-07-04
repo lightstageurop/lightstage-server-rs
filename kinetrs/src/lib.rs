@@ -6,13 +6,16 @@ pub const KINET_UDP_PORT: u16 = 6038;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum KinetHeaderType {
-    DiscoverSupplies = 0x0001,
+    DiscoverSupplies = 0x0001,      // poll
+    DiscoverSuppliesReply = 0x0002, // poll reply
     SetIp = 0x0003,
     SetUniverse = 0x0005,
     SetName = 0x0006,
     DmxOut = 0x0101,
+    // PortOut = 0x0108,
+    // PortOutSync = 0x0109,
     DiscoverFixturesSerialRequest = 0x0201,
-    DiscoverFixturesChannelRequest = 0x0203,
+    DiscoverFixturesChannelRequest = 0x0203, // get dmx address
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
