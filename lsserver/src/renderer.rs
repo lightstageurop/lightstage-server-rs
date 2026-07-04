@@ -4,8 +4,8 @@ use crate::{
 };
 
 pub struct Renderer {
-    pub rgb_fixtures: Vec<Vec<RgbFixture>>,
-    pub white_fixtures: Vec<Vec<WhiteFixture>>,
+    pub rgb_fixtures: Vec<Vec<RgbFixture<u16>>>,
+    pub white_fixtures: Vec<Vec<WhiteFixture<u16>>>,
 }
 
 impl Renderer {

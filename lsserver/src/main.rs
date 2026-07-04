@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
     let mut renderer = Renderer::new();
     for universe in 0..NUM_ARCS {
         for fixture in 0..LIGHTS_PER_ARC {
-            let address = fixtures::DmxAddress::new((fixture * 3 + 1) as u16).unwrap();
+            let address = fixtures::DmxAddress::new((fixture * 6 + 1) as u16).unwrap();
 
             renderer.rgb_fixtures[universe].push(fixtures::RgbFixture::new(address).unwrap());
 

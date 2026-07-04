@@ -15,6 +15,28 @@ impl DmxAddress {
     }
 }
 
+pub trait DmxValue: Copy + Default {
+    const CHANNELS: usize;
+
+    fn write_to(self, dst: &mut [u8]);
+}
+
+impl DmxValue for u8 {
+    const CHANNELS: usize = 1;
+
+    fn write_to(self, dst: &mut [u8]) {
+        dst[0] = self;
+    }
+}
+
+impl DmxValue for u16 {
+    const CHANNELS: usize = 2;
+
+    fn write_to(self, dst: &mut [u8]) {
+        dst[0..2].copy_from_slice(&self.to_be_bytes());
+    }
+}
+
 pub trait Fixture {
     fn channels(&self) -> usize;
 
@@ -22,15 +44,15 @@ pub trait Fixture {
     fn write_to_universe(&self, buf: &mut [u8; 512]);
 }
 
-pub struct RgbFixture {
+pub struct RgbFixture<T: DmxValue> {
     address: DmxAddress,
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
+    pub r: T,
+    pub g: T,
+    pub b: T,
 }
 
-impl RgbFixture {
-    const CHANNELS: usize = 3;
+impl<T: DmxValue> RgbFixture<T> {
+    const CHANNELS: usize = 3 * T::CHANNELS;
 
     pub fn new(address: DmxAddress) -> Option<Self> {
         if address.index() + Self::CHANNELS > 512 {
@@ -39,18 +61,18 @@ impl RgbFixture {
 
         Some(Self {
             address,
-            r: 0,
-            g: 0,
-            b: 0,
+            r: T::default(),
+            g: T::default(),
+            b: T::default(),
         })
     }
 
-    pub fn set_color(&mut self, r: u8, g: u8, b: u8) {
+    pub fn set_color(&mut self, r: T, g: T, b: T) {
         (self.r, self.g, self.b) = (r, g, b);
     }
 }
 
-impl Fixture for RgbFixture {
+impl<T: DmxValue> Fixture for RgbFixture<T> {
     fn channels(&self) -> usize {
         Self::CHANNELS
     }
@@ -60,21 +82,25 @@ impl Fixture for RgbFixture {
     }
 
     fn write_to_universe(&self, buf: &mut [u8; 512]) {
-        let i = self.address.index();
+        let mut i = self.address.index();
         debug_assert!(i + Self::CHANNELS <= 512);
-        buf[i..i + 3].copy_from_slice(&[self.r, self.b, self.g]);
+        self.r.write_to(&mut buf[i..i + T::CHANNELS]);
+        i += T::CHANNELS;
+        self.g.write_to(&mut buf[i..i + T::CHANNELS]);
+        i += T::CHANNELS;
+        self.b.write_to(&mut buf[i..i + T::CHANNELS]);
     }
 }
 
-pub struct WhiteFixture {
+pub struct WhiteFixture<T: DmxValue> {
     address: DmxAddress,
-    pub warm: u8,
-    pub neutral: u8,
-    pub cool: u8,
+    pub warm: T,
+    pub neutral: T,
+    pub cool: T,
 }
 
-impl WhiteFixture {
-    const CHANNELS: usize = 3;
+impl<T: DmxValue> WhiteFixture<T> {
+    const CHANNELS: usize = 3 * T::CHANNELS;
 
     pub fn new(address: DmxAddress) -> Option<Self> {
         if address.index() + Self::CHANNELS > 512 {
@@ -83,18 +109,18 @@ impl WhiteFixture {
 
         Some(Self {
             address,
-            warm: 0,
-            neutral: 0,
-            cool: 0,
+            warm: T::default(),
+            neutral: T::default(),
+            cool: T::default(),
         })
     }
 
-    pub fn set_white(&mut self, warm: u8, neutral: u8, cool: u8) {
+    pub fn set_white(&mut self, warm: T, neutral: T, cool: T) {
         (self.warm, self.neutral, self.cool) = (warm, neutral, cool);
     }
 }
 
-impl Fixture for WhiteFixture {
+impl<T: DmxValue> Fixture for WhiteFixture<T> {
     fn channels(&self) -> usize {
         Self::CHANNELS
     }
@@ -104,8 +130,12 @@ impl Fixture for WhiteFixture {
     }
 
     fn write_to_universe(&self, buf: &mut [u8; 512]) {
-        let i = self.address.index();
+        let mut i = self.address.index();
         debug_assert!(i + Self::CHANNELS <= 512);
-        buf[i..i + 3].copy_from_slice(&[self.warm, self.cool, self.neutral]);
+        self.warm.write_to(&mut buf[i..i + T::CHANNELS]);
+        i += T::CHANNELS;
+        self.neutral.write_to(&mut buf[i..i + T::CHANNELS]);
+        i += T::CHANNELS;
+        self.cool.write_to(&mut buf[i..i + T::CHANNELS]);
     }
 }
