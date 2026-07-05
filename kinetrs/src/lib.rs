@@ -8,6 +8,28 @@
 //!
 //! The protocol appears to be primarily little-endian for most fields,
 //! however for the DMX data, most fixtures that use multiple bytes per channel are big-endian.
+//!
+//! ## Example
+//!
+//! ```rust
+//! use kinetrs::{KinetPacketHeader, DmxOutHeader};
+//!
+//! let dmx_meta = DmxOutHeader {
+//!     sequence: 42,
+//!     ..Default::default()
+//! };
+//! let packet = KinetPacketHeader::DmxOut(dmx_meta);
+//!
+//! let mut buf = Vec::with_capacity(packet.packet_size());
+//! packet.write_to(&mut buf).unwrap();
+//!
+//! let fixture_data = [255u8; 512]; // Full intensity
+//! buf.extend_from_slice(&fixture_data);
+//!
+//! // Ready to send via std::net::UdpSocket!
+//!
+//! # assert_eq!(buf.len(), 533)
+//! ```
 
 use std::{
     io::{self, Write},
