@@ -1,3 +1,4 @@
 [workspace]
   members = ["kinetrs", "lsserver"]
+  package.repository = "https://github.com/lightstageurop/lightstage-server-rs"
   resolver = "3"

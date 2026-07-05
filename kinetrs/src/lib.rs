@@ -1,6 +1,6 @@
-//! # `KiNETrs` - Philips Color Kinetics protocol packet definitions
+//! # `KiNETrs` - Color Kinetics protocol
 //!
-//!  This crate provides serialisation for a subset of the `KiNET` v1 UDP protocol, including:
+//! This crate provides serialisation for a subset of the `KiNET` (Philips Color Kinetics) v1 UDP protocol, including:
 //! - Power supply discovery ([`PollPayload`], [`PollReplyPayload`])
 //! - Dmx Output ([`DmxOutHeader`])
 //!
@@ -157,7 +157,7 @@ pub struct DmxOutHeader {
     /// Seemingly only used for v2 in broadcast environment
     /// See <https://colorkinetics.helpdocs.io/article/umxjxmoc7a-ki-net-ethernet-protocol-whitepaper#ki_net_universes>
     pub port: u8,
-    // No idea what this does, seems to always be zero
+    /// Unsure what this does, seems to always be zero
     pub flags: u16,
     /// Unsure what this does. Usually zero or `u32::MAX`
     pub timer_val: u32,
