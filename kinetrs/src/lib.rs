@@ -39,6 +39,7 @@ use std::{
 /// Default target UDP port
 pub const KINET_UDP_PORT: u16 = 6038;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 enum KinetPacketType {

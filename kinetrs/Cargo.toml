@@ -4,7 +4,6 @@
   homepage = "https://github.com/lightstageurop/lightstage-server-rs/tree/master/kinetrs"
   keywords = ["dmx", "kinet", "lighting"]
   license = "MIT"
-  license-file = "../LICENSE"
   name = "kinetrs"
   repository.workspace = true
   version = "0.1.0"
