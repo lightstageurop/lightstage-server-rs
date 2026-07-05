@@ -1,13 +1,25 @@
+//! # `KiNETrs` - Philips Color Kinetics protocol packet definitions
+//!
+//!  This crate provides serialisation for a subset of the `KiNET` v1 UDP protocol, including:
+//! - Power supply discovery ([`PollPayload`], [`PollReplyPayload`])
+//! - Dmx Output ([`DmxOutHeader`])
+//!
+//! ## Endianness
+//!
+//! The protocol appears to be primarily little-endian for most fields,
+//! however for the DMX data, most fixtures that use multiple bytes per channel are big-endian.
+
 use std::{
     io::{self, Write},
     net::Ipv4Addr,
 };
 
+/// Default target UDP port
 pub const KINET_UDP_PORT: u16 = 6038;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
-pub enum KinetPacketType {
+enum KinetPacketType {
     Poll = 0x0001,      // DiscoverSupplies
     PollReply = 0x0002, // DiscoverSuppliesReply
     SetIp = 0x0003,
@@ -20,19 +32,26 @@ pub enum KinetPacketType {
     DiscoverFixturesChannelRequest = 0x0203, // get dmx address
 }
 
+/// Payload that can be serialised into a KiNET packet.
 pub trait KinetPayload {
     /// Serialised byte length of this payload
     const SIZE: usize;
 
+    /// Serialised byte length of the entire packet
+    ///
+    /// For [`KinetPacketHeader::DmxOut`], this **does not** include the DMX512 data.
     const PACKET_SIZE: usize = KinetPacketHeader::HEADER_SIZE + Self::SIZE;
 
     /// Serialise the payload into writer
     fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()>;
 }
 
+/// Payload for [`KinetPacketHeader::Poll`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PollPayload {
+    /// Sequence. Appears to be unused and always zero.
     pub sequence: u32,
+    /// Unsure what the use of this is. Devices will spoof their source IP to this.
     pub magic_ip: Ipv4Addr,
 }
 
@@ -56,14 +75,22 @@ impl KinetPayload for PollPayload {
     }
 }
 
+/// Payload for [`KinetPacketHeader::PollReply`]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PollReplyPayload {
+    /// Sequence. Appears to be unused and always zero.
     pub sequence: u32,
+    /// Device IPv4 address
     pub src_ip: Ipv4Addr,
+    /// Device MAC address
     pub mac: [u8; 6],
+    /// Unknown field. Observed as `0x0001` usually.
     pub data: u16,
+    /// Device serial number
     pub serial: u32,
+    /// Null-padded ASCII device description string
     pub node_name: [u8; 60],
+    /// Null-padded ASCII user-visible device label
     pub node_label: [u8; 31],
 }
 
@@ -98,18 +125,21 @@ impl KinetPayload for PollReplyPayload {
     }
 }
 
+/// Payload for [`KinetPacketHeader::DmxOut`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DmxOutHeader {
+    /// Packet sequence number. Usually ignored by hardware.
     pub sequence: u32,
-    // DMX output port
-    // Seemingly only used for v2 in broadcast environment
-    // See https://colorkinetics.helpdocs.io/article/umxjxmoc7a-ki-net-ethernet-protocol-whitepaper#ki_net_universes
+    /// DMX output port index
+    ///
+    /// Seemingly only used for v2 in broadcast environment
+    /// See <https://colorkinetics.helpdocs.io/article/umxjxmoc7a-ki-net-ethernet-protocol-whitepaper#ki_net_universes>
     pub port: u8,
     // No idea what this does, seems to always be zero
     pub flags: u16,
-    // no idea what this does
+    /// Unsure what this does. Usually zero or `u32::MAX`
     pub timer_val: u32,
-    // Only used for broadcast
+    /// DMX universe id to target. Rarely used aside from broadcast configurations.
     pub universe: u8,
 }
 
@@ -139,10 +169,22 @@ impl KinetPayload for DmxOutHeader {
     }
 }
 
+/// Serialisable packets
+///
+/// For `DmxOut` does not include DMX512 data
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KinetPacketHeader {
+    /// A poll packet to scan local subnet for active power supplies.
+    ///
+    /// Aka. `DiscoverSupplies`
     Poll(PollPayload),
+    /// A response to [`Self::Poll`], emitted by a power supply.
+    ///
+    /// Aka. `DiscoverSuppliesReply`
     PollReply(PollReplyPayload),
+    /// The header only for a DMX512 packet streamed to power supply(ies).
+    ///
+    /// DMX512 data should be appended directly to the serialised header.
     DmxOut(DmxOutHeader),
 }
 
@@ -151,7 +193,7 @@ impl KinetPacketHeader {
     const KINET_VERSION_1: u16 = 0x0001;
     const HEADER_SIZE: usize = 8;
 
-    pub fn kind(&self) -> KinetPacketType {
+    fn kind(&self) -> KinetPacketType {
         match self {
             Self::Poll(_) => KinetPacketType::Poll,
             Self::PollReply(_) => KinetPacketType::PollReply,
@@ -159,6 +201,9 @@ impl KinetPacketHeader {
         }
     }
 
+    /// Overall buffer length neccessary for serialised packet
+    ///
+    /// For [`Self::DmxOut`] this **does** include the 512 bytes of DMX data.
     pub fn packet_size(&self) -> usize {
         Self::HEADER_SIZE
             + match self {
