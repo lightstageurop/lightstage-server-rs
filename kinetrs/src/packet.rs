@@ -15,6 +15,7 @@ enum KinetPacketType {
     // PortOut = 0x0108,
     // PortOutSync = 0x0109,
     DiscoverFixturesSerialRequest = 0x0201,
+    DiscoverFixturesSerialReply = 0x0202,
     DiscoverFixturesChannelRequest = 0x0203, // get dmx address
 }
 

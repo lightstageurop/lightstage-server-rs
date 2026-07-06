@@ -23,7 +23,9 @@ local packet_types = {
     [0x0006] = "Set Name",
     [0x0101] = "DMX Out",
     [0x0201] = "Discover Fixtures Serial Request",
-    [0x0203] = "Discover Fixtures Channel Request"
+    [0x0202] = "Discover Fixtures Serial Reply",
+    [0x0203] = "Discover Fixtures Channel Request",
+    [0x0204] = "Discover Fixtures Channel Reply"
 }
 
 -- Common fields
@@ -52,13 +54,16 @@ local pf_node_name = ProtoField.string("kinet.node_name", "Node Name")
 local pf_node_label = ProtoField.string("kinet.node_label", "Node Label")
 local pf_reserved16 = ProtoField.uint16("kinet.reserved16", "Reserved", base.HEX)
 
+-- Discover Fixtures Serial Request/Reply
+local pf_target_ip = ProtoField.ipv4("kinet.target_ip", "Target IP")
+local pf_fixture_serial = ProtoField.uint32("kinet.fixture_serial", "Fixture Serial", base.HEX)
+
 -- Generic fields
 local pf_payload = ProtoField.bytes("kinet.payload", "Payload")
 
 kinet.fields = {pf_magic, pf_version, pf_type, pf_sequence, pf_port, pf_padding, pf_flags, pf_timer, pf_universe,
-
                 pf_controller_ip, pf_src_ip, pf_mac, pf_data, pf_serial, pf_reserved32, pf_node_name, pf_node_label,
-                pf_reserved16, pf_payload}
+                pf_reserved16, pf_payload, pf_target_ip, pf_fixture_serial}
 
 -- Dissector
 function kinet.dissector(buffer, pinfo, tree)
@@ -140,7 +145,6 @@ function kinet.dissector(buffer, pinfo, tree)
         end
 
         -- DISCOVER SUPPLIES REPLY (0x0002)
-
     elseif pkt_type == 0x0002 then
 
         local off = COMMON_HEADER_LEN
@@ -185,8 +189,79 @@ function kinet.dissector(buffer, pinfo, tree)
             subtree:add(pf_payload, buffer(COMMON_HEADER_LEN))
         end
 
-        -- EVERYTHING ELSE
+        -- Discover Fixtures Serial Request
+    elseif pkt_type == 0x0201 then
 
+        local off = COMMON_HEADER_LEN
+
+        subtree:add(pf_target_ip, buffer(off, 4))
+        off = off + 4
+
+        -- Any trailing payload
+        if buffer:len() > off then
+            subtree:add(pf_payload, buffer(off))
+        end
+
+        pinfo.cols.info = type_name
+
+        -- Discover Fixtures Serial Reply
+    elseif pkt_type == 0x0202 then
+
+        local off = COMMON_HEADER_LEN
+
+        subtree:add(pf_src_ip, buffer(off, 4))
+        off = off + 4
+
+        local fixture_serial = buffer(off, 4):le_uint()
+        subtree:add_le(pf_fixture_serial, buffer(off, 4))
+        off = off + 4
+
+        -- Any trailing payload
+        if buffer:len() > off then
+            subtree:add(pf_payload, buffer(off))
+        end
+
+        pinfo.cols.info = string.format("%s FSerial=%08X", type_name, fixture_serial)
+
+        -- Discover Fixtures Channel Request
+    elseif pkt_type == 0x0203 then
+
+        local off = COMMON_HEADER_LEN
+
+        subtree:add_le(pf_sequence, buffer(off, 4))
+        off = off + 4
+
+        local fixture_serial = buffer(off, 4):le_uint()
+        subtree:add_le(pf_fixture_serial, buffer(off, 4))
+        off = off + 4
+
+        -- Any trailing payload
+        if buffer:len() > off then
+            subtree:add(pf_payload, buffer(off))
+        end
+
+        pinfo.cols.info = string.format("%s FSerial=%08X", type_name, fixture_serial)
+
+        -- Discover Fixtures Channel Reply
+    elseif pkt_type == 0x0204 then
+
+        local off = COMMON_HEADER_LEN
+
+        subtree:add_le(pf_sequence, buffer(off, 4))
+        off = off + 4
+
+        local fixture_serial = buffer(off, 4):le_uint()
+        subtree:add_le(pf_fixture_serial, buffer(off, 4))
+        off = off + 4
+
+        -- Any trailing payload
+        if buffer:len() > off then
+            subtree:add(pf_payload, buffer(off))
+        end
+
+        pinfo.cols.info = string.format("%s FSerial=%08X", type_name, fixture_serial)
+
+        -- EVERYTHING ELSE
     else
         pinfo.cols.info = type_name
 

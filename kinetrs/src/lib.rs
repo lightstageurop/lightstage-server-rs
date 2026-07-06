@@ -31,11 +31,7 @@
 //! # assert_eq!(buf.len(), 533)
 //! ```
 
-use std::{
-    io::{self, Write},
-    net::Ipv4Addr,
-};
-
+mod fixtures;
 mod packet;
 mod payload;
 
