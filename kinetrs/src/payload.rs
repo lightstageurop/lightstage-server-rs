@@ -5,7 +5,7 @@ use std::{
 
 use crate::KinetPacketHeader;
 
-/// Payload that can be serialised into a KiNET packet.
+/// Payload that can be serialised into a `KiNET` packet.
 pub trait KinetPayload {
     /// Serialised byte length of this payload
     const SIZE: usize;
@@ -98,6 +98,50 @@ impl KinetPayload for PollReplyPayload {
     }
 }
 
+/// Payload for [`KinetPacketHeader::HeartBeat`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeartBeatPayload {
+    /// Sequence. Appears to be unused and always zero.
+    pub sequence: u32,
+    /// Device IPv4 address
+    pub src_ip: Ipv4Addr,
+    /// Device MAC address
+    pub mac: [u8; 6],
+    /// Unknown field. Observed as `0x0001` usually.
+    pub data16: u16,
+    /// Device serial number
+    pub serial: u32,
+    /// Unknown field. Observed as `0x00030001` usually.
+    pub data32: u32,
+}
+
+impl Default for HeartBeatPayload {
+    fn default() -> Self {
+        Self {
+            sequence: 0,
+            data16: 0x0001,
+            src_ip: Ipv4Addr::UNSPECIFIED,
+            mac: Default::default(),
+            serial: Default::default(),
+            data32: 0x0003_0001,
+        }
+    }
+}
+
+impl KinetPayload for HeartBeatPayload {
+    const SIZE: usize = 24;
+
+    fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_all(&self.sequence.to_le_bytes())?;
+        writer.write_all(&self.src_ip.octets())?;
+        writer.write_all(&self.mac)?;
+        writer.write_all(&self.data16.to_le_bytes())?;
+        writer.write_all(&self.serial.to_le_bytes())?;
+        writer.write_all(&self.data32.to_le_bytes())?;
+        Ok(())
+    }
+}
+
 /// Payload for [`KinetPacketHeader::DmxOut`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DmxOutHeader {
@@ -160,6 +204,7 @@ mod tests {
     fn test_payload_sizes_match_constants() {
         assert_payload_size::<PollPayload>("PollPayload");
         assert_payload_size::<PollReplyPayload>("PollReplyPayload");
+        assert_payload_size::<HeartBeatPayload>("HeartBeatPayload");
         assert_payload_size::<DmxOutHeader>("DmxOutHeader");
     }
 }

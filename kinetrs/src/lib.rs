@@ -36,7 +36,7 @@ mod packet;
 mod payload;
 
 pub use packet::KinetPacketHeader;
-pub use payload::{DmxOutHeader, KinetPayload, PollPayload, PollReplyPayload};
+pub use payload::{DmxOutHeader, HeartBeatPayload, KinetPayload, PollPayload, PollReplyPayload};
 
 /// Default target UDP port
 pub const KINET_UDP_PORT: u16 = 6038;

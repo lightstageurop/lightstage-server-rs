@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::payload::{DmxOutHeader, KinetPayload, PollPayload, PollReplyPayload};
+use crate::payload::{DmxOutHeader, HeartBeatPayload, KinetPayload, PollPayload, PollReplyPayload};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +11,7 @@ enum KinetPacketType {
     SetIp = 0x0003,
     SetUniverse = 0x0005,
     SetName = 0x0006,
+    HeartBeat = 0x0008,
     DmxOut = 0x0101,
     // PortOut = 0x0108,
     // PortOutSync = 0x0109,
@@ -32,6 +33,8 @@ pub enum KinetPacketHeader {
     ///
     /// Aka. `DiscoverSuppliesReply`
     PollReply(PollReplyPayload),
+    /// A heartbeat sent out by each power supply every 90s.
+    HeartBeat(HeartBeatPayload),
     /// The header only for a DMX512 packet streamed to power supply(ies).
     ///
     /// DMX512 data should be appended directly to the serialised header.
@@ -47,6 +50,7 @@ impl KinetPacketHeader {
         match self {
             Self::Poll(_) => KinetPacketType::Poll,
             Self::PollReply(_) => KinetPacketType::PollReply,
+            Self::HeartBeat(_) => KinetPacketType::HeartBeat,
             Self::DmxOut(_) => KinetPacketType::DmxOut,
         }
     }
@@ -59,6 +63,7 @@ impl KinetPacketHeader {
             + match self {
                 Self::Poll(_) => PollPayload::SIZE,
                 Self::PollReply(_) => PollReplyPayload::SIZE,
+                Self::HeartBeat(_) => HeartBeatPayload::SIZE,
                 Self::DmxOut(_) => DmxOutHeader::SIZE + 512,
             }
     }
@@ -73,6 +78,7 @@ impl KinetPacketHeader {
         match self {
             Self::Poll(payload) => payload.write_to(writer),
             Self::PollReply(payload) => payload.write_to(writer),
+            Self::HeartBeat(payload) => payload.write_to(writer),
             Self::DmxOut(payload) => payload.write_to(writer),
         }?;
 
@@ -219,6 +225,36 @@ mod tests {
             buf, exact_payload,
             "Real-world DiscoverSuppliesReply snapshot failed to match!"
         );
+    }
+
+    #[test]
+    fn test_to_bytes_heartbeat() {
+        let packet = KinetPacketHeader::HeartBeat(HeartBeatPayload {
+            src_ip: Ipv4Addr::new(10, 37, 1, 2),
+            mac: [0x00, 0x0A, 0xC5, 0x12, 0x34, 0x56],
+            serial: 0x3D00_FEDC,
+            ..Default::default()
+        });
+
+        let mut buf = Vec::new();
+        packet.write_to(&mut buf).unwrap();
+
+        assert_eq!(
+            &buf[0..8],
+            &[0x04, 0x01, 0xDC, 0x4A, 0x01, 0x00, 0x08, 0x00],
+            "Header mismatch"
+        );
+        assert_eq!(&buf[8..12], &[0x00, 0x00, 0x00, 0x00], "Sequence mismatch");
+        assert_eq!(&buf[12..16], &[10, 37, 1, 2], "IP mismatch");
+        assert_eq!(
+            &buf[16..22],
+            &[0x00, 0x0a, 0xc5, 0x12, 0x34, 0x56],
+            "MAC mismatch"
+        );
+        assert_eq!(&buf[22..24], &[0x01, 0x00], "Data16 mismatch");
+        assert_eq!(&buf[24..28], &[0xdc, 0xfe, 0x00, 0x3d], "Serial mismatch");
+        assert_eq!(&buf[28..32], &[0x01, 0x00, 0x03, 0x00], "Data32 mismatch");
+        assert_eq!(buf.len(), 32);
     }
 
     #[test]

@@ -21,6 +21,7 @@ local packet_types = {
     [0x0003] = "Set IP",
     [0x0005] = "Set Universe",
     [0x0006] = "Set Name",
+    [0x0008] = "Heartbeat",
     [0x0101] = "DMX Out",
     [0x0201] = "Discover Fixtures Serial Request",
     [0x0202] = "Discover Fixtures Serial Reply",
@@ -161,7 +162,7 @@ function kinet.dissector(buffer, pinfo, tree)
             subtree:add(pf_mac, buffer(off, 6))
             off = off + 6
 
-            subtree:add(pf_data, buffer(off, 2))
+            subtree:add_le(pf_data, buffer(off, 2))
             off = off + 2
 
             local serial = buffer(off, 4):le_uint()
@@ -188,6 +189,33 @@ function kinet.dissector(buffer, pinfo, tree)
             pinfo.cols.info = type_name
             subtree:add(pf_payload, buffer(COMMON_HEADER_LEN))
         end
+
+        -- Heartbeat
+    elseif pkt_type == 0x0008 then
+
+        local off = COMMON_HEADER_LEN
+
+        -- All KiNET packets include the sequence field. Meaningful only for DMX Out.
+        subtree:add_le(pf_sequence, buffer(off, 4))
+        off = off + 4
+
+        subtree:add(pf_src_ip, buffer(off, 4))
+        off = off + 4
+
+        subtree:add(pf_mac, buffer(off, 6))
+        off = off + 6
+
+        subtree:add_le(pf_data, buffer(off, 2))
+        off = off + 2
+
+        local serial = buffer(off, 4):le_uint()
+        subtree:add_le(pf_serial, buffer(off, 4))
+        off = off + 4
+
+        subtree:add_le(pf_reserved32, buffer(off, 4))
+        off = off + 4
+
+        pinfo.cols.info = string.format("%s Serial=%08X", type_name, serial)
 
         -- Discover Fixtures Serial Request
     elseif pkt_type == 0x0201 then
