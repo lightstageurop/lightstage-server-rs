@@ -137,7 +137,7 @@ mod tests {
         let name_str = b"Generic Power Supply Name";
         node_name[..name_str.len()].copy_from_slice(name_str);
 
-        let mut node_label = [0u8; 31];
+        let mut node_label = [0u8; 33];
         let label_str = b"Generic Power Supply Label";
         node_label[..label_str.len()].copy_from_slice(label_str);
 
@@ -206,7 +206,7 @@ mod tests {
         let name_str = b"M:Color Kinetics Incorporated\nD:PDS-X\n#:SFT-000080-00\nR:02\n";
         node_name[..name_str.len()].copy_from_slice(name_str);
 
-        let mut node_label = [0u8; 31];
+        let mut node_label = [0u8; 33];
         let label_str = b"Arc 1W";
         node_label[..label_str.len()].copy_from_slice(label_str);
 

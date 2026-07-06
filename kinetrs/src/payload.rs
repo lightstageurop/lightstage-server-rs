@@ -1,4 +1,5 @@
 use std::{
+    ffi::CStr,
     io::{self, Write},
     net::Ipv4Addr,
 };
@@ -63,8 +64,10 @@ pub struct PollReplyPayload {
     pub serial: u32,
     /// Null-padded ASCII device description string
     pub node_name: [u8; 60],
-    /// Null-padded ASCII user-visible device label
-    pub node_label: [u8; 31],
+    /// Null-padded ASCII user-visible device label.
+    ///
+    /// Should be null terminated.
+    pub node_label: [u8; 33],
 }
 
 impl Default for PollReplyPayload {
@@ -72,12 +75,50 @@ impl Default for PollReplyPayload {
         Self {
             src_ip: Ipv4Addr::UNSPECIFIED,
             node_name: [0u8; 60],
-            node_label: [0u8; 31],
+            node_label: [0u8; 33],
             sequence: Default::default(),
             mac: Default::default(),
             data: Default::default(),
             serial: Default::default(),
         }
+    }
+}
+
+impl PollReplyPayload {
+    #[must_use]
+    pub fn with_name(mut self, name: &str) -> Option<Self> {
+        if !name.is_ascii() || name.len() >= self.node_name.len() {
+            return None;
+        }
+        self.node_name.fill(0u8);
+        let bytes = name.as_bytes();
+        self.node_name[..bytes.len()].copy_from_slice(bytes);
+        Some(self)
+    }
+
+    #[must_use]
+    pub fn with_label(mut self, label: &str) -> Option<Self> {
+        if !label.is_ascii() || label.len() >= self.node_label.len() {
+            return None;
+        }
+        self.node_label.fill(0u8);
+        let bytes = label.as_bytes();
+        self.node_label[..bytes.len()].copy_from_slice(bytes);
+        Some(self)
+    }
+
+    #[must_use]
+    pub fn node_name_as_str(&self) -> Option<&str> {
+        CStr::from_bytes_until_nul(&self.node_name)
+            .ok()
+            .and_then(|cstr| cstr.to_str().ok())
+    }
+
+    #[must_use]
+    pub fn node_label_as_str(&self) -> Option<&str> {
+        CStr::from_bytes_until_nul(&self.node_label)
+            .ok()
+            .and_then(|cstr| cstr.to_str().ok())
     }
 }
 
@@ -93,7 +134,6 @@ impl KinetPayload for PollReplyPayload {
         writer.write_all(&[0u8; 4])?;
         writer.write_all(&self.node_name)?;
         writer.write_all(&self.node_label)?;
-        writer.write_all(&[0u8; 2])?;
         Ok(())
     }
 }
