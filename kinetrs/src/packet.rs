@@ -144,9 +144,9 @@ mod tests {
         let header = KinetPacketHeader::PollReply(PollReplyPayload {
             sequence: 42,
             src_ip: Ipv4Addr::new(10, 1, 2, 3),
-            mac: [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
+            mac: [0x00, 0x0a, 0xc5, 0xdd, 0xee, 0xff],
             data: 0x0001,
-            serial: 0x1234_5678,
+            serial: 0x3D00_5678,
             node_name,
             node_label,
         });
@@ -164,11 +164,11 @@ mod tests {
         assert_eq!(&buf[12..16], &[10, 1, 2, 3], "IP mismatch");
         assert_eq!(
             &buf[16..22],
-            &[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
+            &[0x00, 0x0a, 0xc5, 0xdd, 0xee, 0xff],
             "MAC mismatch"
         );
         assert_eq!(&buf[22..24], &[0x01, 0x00], "Data mismatch");
-        assert_eq!(&buf[24..28], &[0x78, 0x56, 0x34, 0x12], "Serial mismatch");
+        assert_eq!(&buf[24..28], &[0x78, 0x56, 0x00, 0x3D], "Serial mismatch");
         assert_eq!(
             &buf[28..32],
             &[0x00, 0x00, 0x00, 0x00],
