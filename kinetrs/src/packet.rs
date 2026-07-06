@@ -23,7 +23,8 @@ enum KinetPacketType {
 /// Serialisable packets
 ///
 /// For `DmxOut` does not include DMX512 data
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KinetPacketHeader {
     /// A poll packet to scan local subnet for active power supplies.
     ///
@@ -58,6 +59,7 @@ impl KinetPacketHeader {
     /// Overall buffer length neccessary for serialised packet
     ///
     /// For [`Self::DmxOut`] this **does** include the 512 bytes of DMX data.
+    #[must_use]
     pub fn packet_size(&self) -> usize {
         Self::HEADER_SIZE
             + match self {

@@ -49,7 +49,7 @@ impl KinetPayload for PollPayload {
 }
 
 /// Payload for [`KinetPacketHeader::PollReply`]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PollReplyPayload {
     /// Sequence. Appears to be unused and always zero.
     pub sequence: u32,
