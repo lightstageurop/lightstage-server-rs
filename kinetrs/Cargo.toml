@@ -9,3 +9,4 @@
   version = "0.2.0"
 
 [dependencies]
+  num_enum = "0.7.6"

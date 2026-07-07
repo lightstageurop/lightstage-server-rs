@@ -1,6 +1,6 @@
 use std::{
     ffi::CStr,
-    io::{self, Write},
+    io::{self, Read, Write},
     net::Ipv4Addr,
 };
 
@@ -18,6 +18,11 @@ pub trait KinetPayload {
 
     /// Serialise the payload into writer
     fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()>;
+
+    /// Deserialise
+    fn read_from<R: Read>(reader: &mut R) -> io::Result<Self>
+    where
+        Self: Sized;
 }
 
 /// Payload for [`KinetPacketHeader::Poll`]
@@ -46,6 +51,13 @@ impl KinetPayload for PollPayload {
         writer.write_all(&self.magic_ip.octets())?;
         writer.write_all(&[0u8; 2])?; // reserved
         Ok(())
+    }
+
+    fn read_from<R: Read>(reader: &mut R) -> io::Result<Self>
+    where
+        Self: Sized,
+    {
+        todo!()
     }
 }
 
@@ -136,6 +148,39 @@ impl KinetPayload for PollReplyPayload {
         writer.write_all(&self.node_label)?;
         Ok(())
     }
+
+    fn read_from<R: Read>(reader: &mut R) -> io::Result<Self>
+    where
+        Self: Sized,
+    {
+        let mut seq_bytes = [0u8; 4];
+        let mut src_ip = [0u8; 4];
+        let mut mac = [0u8; 6];
+        let mut data = [0u8; 2];
+        let mut serial = [0u8; 4];
+        let mut reserved = [0u8; 4];
+        let mut node_name = [0u8; 60];
+        let mut node_label = [0u8; 33];
+
+        reader.read_exact(&mut seq_bytes)?;
+        reader.read_exact(&mut src_ip)?;
+        reader.read_exact(&mut mac)?;
+        reader.read_exact(&mut data)?;
+        reader.read_exact(&mut serial)?;
+        reader.read_exact(&mut reserved)?;
+        reader.read_exact(&mut node_name)?;
+        reader.read_exact(&mut node_label)?;
+
+        Ok(Self {
+            sequence: u32::from_le_bytes(seq_bytes),
+            src_ip: Ipv4Addr::from(src_ip),
+            mac,
+            data: u16::from_le_bytes(data),
+            serial: u32::from_le_bytes(serial),
+            node_name,
+            node_label,
+        })
+    }
 }
 
 /// Payload for [`KinetPacketHeader::HeartBeat`]
@@ -180,6 +225,13 @@ impl KinetPayload for HeartBeatPayload {
         writer.write_all(&self.data32.to_le_bytes())?;
         Ok(())
     }
+
+    fn read_from<R: Read>(reader: &mut R) -> io::Result<Self>
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
 }
 
 /// Payload for [`KinetPacketHeader::DmxOut`]
@@ -223,6 +275,13 @@ impl KinetPayload for DmxOutHeader {
         writer.write_all(&self.timer_val.to_le_bytes())?;
         writer.write_all(&[self.universe])?;
         Ok(())
+    }
+
+    fn read_from<R: Read>(reader: &mut R) -> io::Result<Self>
+    where
+        Self: Sized,
+    {
+        todo!()
     }
 }
 

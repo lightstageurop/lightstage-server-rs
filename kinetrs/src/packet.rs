@@ -1,9 +1,11 @@
 use std::io::{self, Write};
 
+use num_enum::TryFromPrimitive;
+
 use crate::payload::{DmxOutHeader, HeartBeatPayload, KinetPayload, PollPayload, PollReplyPayload};
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u16)]
 enum KinetPacketType {
     Poll = 0x0001,      // DiscoverSupplies
@@ -85,6 +87,54 @@ impl KinetPacketHeader {
         }?;
 
         Ok(())
+    }
+
+    pub fn read_from<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        let mut magic_bytes = [0u8; 4];
+        let mut version_bytes = [0u8; 2];
+        let mut kind_bytes = [0u8; 2];
+
+        reader.read_exact(&mut magic_bytes)?;
+        reader.read_exact(&mut version_bytes)?;
+        reader.read_exact(&mut kind_bytes)?;
+
+        // validate magic
+        let magic = u32::from_be_bytes(magic_bytes);
+        if magic != Self::KINET_MAGIC {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid KiNET magic: {magic:#0X}"),
+            ));
+        }
+
+        // validate version
+        let version = u16::from_le_bytes(version_bytes);
+        if version != Self::KINET_VERSION_1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Unsupported KiNET version: {version}"),
+            ));
+        }
+
+        // parse type
+        let kind_value = u16::from_le_bytes(kind_bytes);
+        let kind = KinetPacketType::try_from(kind_value).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Unknown KiNET packet type identifier: {kind_value:#06X}"),
+            )
+        })?;
+
+        match kind {
+            KinetPacketType::Poll => Ok(Self::Poll(PollPayload::read_from(reader)?)),
+            KinetPacketType::PollReply => Ok(Self::PollReply(PollReplyPayload::read_from(reader)?)),
+            KinetPacketType::HeartBeat => Ok(Self::HeartBeat(HeartBeatPayload::read_from(reader)?)),
+            KinetPacketType::DmxOut => Ok(Self::DmxOut(DmxOutHeader::read_from(reader)?)),
+            unhandled => Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!("KiNET packet type {unhandled:?} is recognised, but unimplemented."),
+            )),
+        }
     }
 }
 
