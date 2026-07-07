@@ -5,29 +5,27 @@ use std::{
     time::{Duration, Instant},
 };
 
-use kinetrs::{KINET_UDP_PORT, KinetHeader};
+use kinetrs::{DmxOutHeader, KinetPacketHeader, KinetPayload};
 
-use crate::{
-    config::{KINET_REFRESH_RATE_MS, LIGHTS_PER_ARC, NUM_ARCS, PDS_SUBNET_BASE},
-    renderer::Renderer,
-};
+use crate::{config::ServerConfig, renderer::Renderer};
 
 mod config;
 mod fixtures;
 mod renderer;
 mod universe;
 
+#[derive(Clone)]
 pub struct LightStageFrame {
-    pub rgb_universes: [[u8; 512]; NUM_ARCS],
-    pub white_universes: [[u8; 512]; NUM_ARCS],
+    pub rgb_universes: [[u8; 512]; 12], // TODO dont hard code
+    pub white_universes: [[u8; 512]; 12],
 }
 
 impl LightStageFrame {
     #[must_use]
     pub fn black() -> Self {
         Self {
-            rgb_universes: [[0u8; 512]; NUM_ARCS],
-            white_universes: [[0u8; 512]; NUM_ARCS],
+            rgb_universes: [[0u8; 512]; 12],
+            white_universes: [[0u8; 512]; 12],
         }
     }
 }
@@ -35,6 +33,8 @@ impl LightStageFrame {
 pub type SharedState = Arc<RwLock<LightStageFrame>>;
 
 fn main() -> anyhow::Result<()> {
+    let config = ServerConfig::default();
+
     let state: SharedState = Arc::new(RwLock::new(LightStageFrame::black()));
 
     let mut renderer = Renderer::new();
@@ -94,9 +94,9 @@ fn main() -> anyhow::Result<()> {
     //     let state = state.clone();
     //     thread::spawn(move || {
     //         for arc in 0..12 {
-    //             for light in 0..LIGHTS_PER_ARC {
-    //                 renderer.rgb_fixtures[arc][light].set_color(100, 100, 100);
-    //                 renderer.white_fixtures[arc][light].set_white(100, 100, 100);
+    //             for light in 0..config.lights_per_arc {
+    //                 renderer.rgb_fixtures[arc][light].set_color(0, 65535, 0);
+    //                 renderer.white_fixtures[arc][light].set_white(0, 0, 65535);
     //                 {
     //                     let mut state_e = state.write().unwrap();
     //                     renderer.update(&mut state_e);

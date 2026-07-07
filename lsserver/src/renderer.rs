@@ -1,5 +1,6 @@
 use crate::{
-    LightStageFrame, NUM_ARCS,
+    LightStageFrame,
+    config::ServerConfig,
     fixtures::{Fixture, RgbFixture, WhiteFixture},
 };
 
@@ -9,10 +10,10 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new() -> Self {
+    pub fn new(config: &ServerConfig) -> Self {
         Self {
-            rgb_fixtures: (0..NUM_ARCS).map(|_| Vec::new()).collect(),
-            white_fixtures: (0..NUM_ARCS).map(|_| Vec::new()).collect(),
+            rgb_fixtures: (0..config.num_arcs).map(|_| Vec::new()).collect(),
+            white_fixtures: (0..config.num_arcs).map(|_| Vec::new()).collect(),
         }
     }
 
