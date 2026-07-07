@@ -15,6 +15,7 @@ use crate::{
     state::{SharedState, StageMode, StageState},
 };
 
+mod api;
 mod config;
 mod fixtures;
 mod network;
@@ -44,7 +45,8 @@ impl LightStageFrame {
     }
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let config = ServerConfig::default();
 
     println!("Starting light stage server..");
@@ -219,7 +221,7 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    loop {
-        thread::park();
-    }
+    api::start_server(config.api_ip, config.api_port, state.clone()).await;
+
+    Ok(())
 }
