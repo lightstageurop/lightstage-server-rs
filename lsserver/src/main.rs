@@ -7,10 +7,15 @@ use std::{
 
 use kinetrs::{DmxOutHeader, KinetPacketHeader, KinetPayload};
 
-use crate::{config::ServerConfig, renderer::Renderer};
+use crate::{
+    config::ServerConfig,
+    network::{discover_pds, map_targets},
+    renderer::Renderer,
+};
 
 mod config;
 mod fixtures;
+mod network;
 mod renderer;
 mod universe;
 
@@ -34,6 +39,13 @@ pub type SharedState = Arc<RwLock<LightStageFrame>>;
 
 fn main() -> anyhow::Result<()> {
     let config = ServerConfig::default();
+
+    println!("Starting light stage server..");
+
+    let raw_targets = discover_pds(config.kinet_port)?;
+    let targets = map_targets(raw_targets);
+
+    println!("Discovered {} power supplies", targets.len());
 
     let state: SharedState = Arc::new(RwLock::new(LightStageFrame::black()));
 
