@@ -12,18 +12,26 @@ use crate::{
     config::ServerConfig,
     network::{discover_pds, map_targets},
     renderer::Renderer,
+    state::{SharedState, StageMode, StageState},
 };
 
 mod config;
 mod fixtures;
 mod network;
 mod renderer;
+mod state;
 mod universe;
 
 #[derive(Clone)]
 pub struct LightStageFrame {
     pub rgb_universes: [[u8; 512]; 12], // TODO dont hard code
     pub white_universes: [[u8; 512]; 12],
+}
+
+impl Default for LightStageFrame {
+    fn default() -> Self {
+        Self::black()
+    }
 }
 
 impl LightStageFrame {
@@ -36,8 +44,6 @@ impl LightStageFrame {
     }
 }
 
-pub type SharedState = Arc<RwLock<LightStageFrame>>;
-
 fn main() -> anyhow::Result<()> {
     let config = ServerConfig::default();
 
@@ -47,8 +53,6 @@ fn main() -> anyhow::Result<()> {
     let targets = map_targets(raw_targets);
 
     println!("Discovered {} power supplies", targets.len());
-
-    let state: SharedState = Arc::new(RwLock::new(LightStageFrame::black()));
 
     let mut renderer = Renderer::new(&config);
     for universe in 0..config.num_arcs {
@@ -60,6 +64,8 @@ fn main() -> anyhow::Result<()> {
             renderer.white_fixtures[universe].push(fixtures::WhiteFixture::new(address).unwrap());
         }
     }
+
+    let state: SharedState = Arc::new(RwLock::new(StageState::new(renderer)));
 
     let state_net = state.clone();
     let socket = UdpSocket::bind("0.0.0.0:0")?;
@@ -75,7 +81,15 @@ fn main() -> anyhow::Result<()> {
 
         loop {
             {
-                let frame = { state_net.read().unwrap() }.clone();
+                let frame = {
+                    let lock = state_net.write().unwrap();
+                    match lock.mode {
+                        state::StageMode::Demo | state::StageMode::Manual => {
+                            lock.current_frame.clone()
+                        }
+                        state::StageMode::Playback => todo!(),
+                    }
+                };
 
                 for arc in 0..config.num_arcs {
                     if let Some(rgb_addr) = targets.get(&(arc, true)) {
@@ -166,30 +180,39 @@ fn main() -> anyhow::Result<()> {
         let center = 32767.5 * brightness;
 
         loop {
-            let elapsed = start_time.elapsed().as_secs_f32();
+            if state_render.read().unwrap().mode == StageMode::Demo {
+                let elapsed = start_time.elapsed().as_secs_f32();
 
-            for arc in 0..12 {
-                for light in 0..config.lights_per_arc {
-                    let phase_offset = (arc as f32 * 0.5) + (light as f32 * 0.2);
-                    let t = elapsed * 2.0 + phase_offset;
+                for arc in 0..12 {
+                    for light in 0..config.lights_per_arc {
+                        let phase_offset = (arc as f32 * 0.5) + (light as f32 * 0.2);
+                        let t = elapsed * 2.0 + phase_offset;
 
-                    // Calculate RGB using the new dimmed amplitude and center
-                    let r = ((t).sin() * amplitude + center) as u16;
-                    let g = ((t + 2.094).sin() * amplitude + center) as u16;
-                    let b = ((t + 4.188).sin() * amplitude + center) as u16;
+                        // Calculate RGB using the new dimmed amplitude and center
+                        let r = ((t).sin() * amplitude + center) as u16;
+                        let g = ((t + 2.094).sin() * amplitude + center) as u16;
+                        let b = ((t + 4.188).sin() * amplitude + center) as u16;
 
-                    renderer.rgb_fixtures[arc][light].set_color(r, g, b);
+                        state_render.write().unwrap().renderer.rgb_fixtures[arc][light]
+                            .set_color(r, g, b);
 
-                    // Apply the same dimming to the white fixtures
-                    let w_phase = elapsed * 1.5 - phase_offset;
-                    let w = ((w_phase.sin() * amplitude) + center) as u16;
-                    renderer.white_fixtures[arc][light].set_white(w, w, w);
+                        // Apply the same dimming to the white fixtures
+                        let w_phase = elapsed * 1.5 - phase_offset;
+                        let w = ((w_phase.sin() * amplitude) + center) as u16;
+                        state_render.write().unwrap().renderer.white_fixtures[arc][light]
+                            .set_white(w, w, w);
+                    }
                 }
-            }
 
-            {
-                let mut state_e = state_render.write().unwrap();
-                renderer.update(&mut state_e);
+                {
+                    let mut state_e = state_render.write().unwrap();
+                    let StageState {
+                        renderer,
+                        current_frame,
+                        ..
+                    } = &mut *state_e;
+                    renderer.update(current_frame);
+                }
             }
 
             thread::sleep(Duration::from_millis(10));
