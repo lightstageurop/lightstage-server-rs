@@ -1,11 +1,13 @@
 use std::{
     collections::HashMap,
     io::Cursor,
-    net::{Ipv4Addr, SocketAddr, UdpSocket},
+    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     time::{Duration, Instant},
 };
 
+use anyhow::anyhow;
 use kinetrs::{KinetPacketHeader, KinetPayload, PollPayload, PollReplyPayload};
+use tracing::{debug, warn};
 
 /// One of our discovered PDS on the network.
 pub struct KinetPowerSupply {
@@ -16,60 +18,90 @@ pub struct KinetPowerSupply {
 
 /// Discover PDS on the network with [`kinetrs::KinetPacketHeader::Poll`] and listen for replies.
 pub fn discover_pds(port: u16) -> anyhow::Result<Vec<KinetPowerSupply>> {
-    let socket = UdpSocket::bind("10.37.23.200:0")?;
-    let _ = socket.set_broadcast(true);
-    let _ = socket.set_read_timeout(Some(Duration::from_millis(100)));
+    let ifaces = local_ip_address::list_afinet_netifas()?;
 
+    // Find the correct local IP to bind to when there are multple interfaces
+    // TODO this should be in main so we can reused for the refresh dmx thread too.
+    let local_ip = ifaces
+        .into_iter()
+        .find_map(|(_, ip)| match ip {
+            IpAddr::V4(v4_addr) if v4_addr.octets()[0] == 10 => Some(ip),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            anyhow!(
+                "No active network interfaces found in 10.0.0.0/8 range. Is ethernet connected?"
+            )
+        })?;
+
+    // Bind to it, instead of 0.0.0.0 which may result in a different interface being used.
+    let socket = UdpSocket::bind(SocketAddr::new(local_ip, 0))?;
+
+    socket.set_broadcast(true)?;
+    socket.set_read_timeout(Some(Duration::from_millis(100)))?;
+
+    // Outbound discovery packet
     let poll_packet = KinetPacketHeader::Poll(PollPayload {
-        magic_ip: Ipv4Addr::new(10, 37, 1, 1), // this cannot be 0.0.0.0 or 255.255.255.255 because the OS ignores it otherwise
+        // This cannot be 0.0.0.0 or 255.255.255.255 otherwise the replies will never reach us.
+        // It doesn't technically have to be on the correct subnet however.
+        magic_ip: Ipv4Addr::new(10, 37, 1, 1),
         ..Default::default()
     });
-    let mut buf = Vec::new();
-    let _ = poll_packet.write_to(&mut buf);
 
+    // Serialise and send it
+    let mut buf = Vec::new();
+    poll_packet.write_to(&mut buf)?;
     socket.send_to(&buf, SocketAddr::new(Ipv4Addr::BROADCAST.into(), port))?;
 
     let mut discovered_targets = Vec::new();
-
     let mut buf = [0u8; PollReplyPayload::PACKET_SIZE];
-
     let start_time = Instant::now();
 
-    while start_time.elapsed() < Duration::from_secs(2) {
-        if let Ok((size, _src)) = socket.recv_from(&mut buf) {
-            match KinetPacketHeader::read_from(&mut Cursor::new(&mut buf[..size])) {
-                Ok(packet) => match packet {
-                    KinetPacketHeader::PollReply(reply) => {
-                        println!(
-                            "Found PDS {:X} at {}. Label: {}",
-                            reply.serial,
-                            reply.src_ip,
-                            reply.node_label_as_str().unwrap()
-                        );
+    while start_time.elapsed() < Duration::from_secs(1) {
+        // ignore recv timeouts or other socket errors
+        let Ok((size, _src)) = socket.recv_from(&mut buf) else {
+            continue;
+        };
 
-                        // TODO rewrite this shit
-                        let label = reply.node_label_as_str().unwrap_or_default();
-                        let label_parts: Vec<&str> = label.split_whitespace().collect();
-                        if label_parts.len() == 2 {
-                            let identifier = label_parts[1];
-                            let is_rgb = identifier.ends_with('C');
-                            let is_white = identifier.ends_with('W');
-                            if is_rgb || is_white {
-                                let num_str = &identifier[..identifier.len() - 1];
-                                if let Ok(arc_index) = num_str.parse::<usize>() {
-                                    let addr = SocketAddr::new(reply.src_ip.into(), port);
-                                    discovered_targets.push(KinetPowerSupply {
-                                        remote_adr: addr,
-                                        arc_index,
-                                        is_rgb,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    _ => todo!(), // and maybe handle errors correctly?
-                },
-                Err(_) => todo!(),
+        // serialise the packet or warn and continue
+        let packet = match KinetPacketHeader::read_from(&mut Cursor::new(&mut buf[..size])) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("Received unparsable network packet: {e:?}");
+                continue;
+            }
+        };
+
+        // ignore anything that isnt a reply (eg. heartbeat)
+        let KinetPacketHeader::PollReply(reply) = packet else {
+            continue;
+        };
+
+        let label = reply.node_label_as_str().unwrap_or_default();
+        debug!(
+            "Found PDS {:X} at {}. Label: {}",
+            reply.serial, reply.src_ip, label
+        );
+
+        // check and parse our custom label format. "Arc N(C/W)"
+        let label_parts: Vec<&str> = label.split_whitespace().collect(); // eg. ["Arc","0C"]
+        if let [_, identifier] = label_parts.as_slice() {
+            let (is_rgb, num_str) = if let Some(n) = identifier.strip_suffix('C') {
+                (true, n)
+            } else if let Some(n) = identifier.strip_suffix('W') {
+                (false, n)
+            } else {
+                continue; // identifier doesn't end in C or W.
+            };
+
+            // try and parse the arc number
+            if let Ok(arc_index) = num_str.parse::<usize>() {
+                // success. push back PDS info
+                discovered_targets.push(KinetPowerSupply {
+                    remote_adr: SocketAddr::new(reply.src_ip.into(), port),
+                    arc_index,
+                    is_rgb,
+                });
             }
         }
     }
@@ -82,12 +114,9 @@ pub fn discover_pds(port: u16) -> anyhow::Result<Vec<KinetPowerSupply>> {
 /// key: `(arc_index, is_rgb)`, value: `SocketAddr`
 pub fn map_targets(
     raw_targets: Vec<KinetPowerSupply>,
-) -> std::collections::HashMap<(usize, bool), std::net::SocketAddr> {
-    let mut mapped = HashMap::new();
-
-    for pds in raw_targets {
-        mapped.insert((pds.arc_index, pds.is_rgb), pds.remote_adr);
-    }
-
-    mapped
+) -> HashMap<(usize, bool), std::net::SocketAddr> {
+    raw_targets
+        .into_iter()
+        .map(|pds| ((pds.arc_index, pds.is_rgb), pds.remote_adr))
+        .collect()
 }
