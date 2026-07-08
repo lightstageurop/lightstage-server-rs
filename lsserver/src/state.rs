@@ -1,11 +1,12 @@
 use std::sync::{Arc, RwLock};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::{LightStageFrame, renderer::Renderer};
 
 /// Defines the active operation mode of the light stage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
 pub enum StageMode {
     /// Runs a pleasing background animation
     #[default]

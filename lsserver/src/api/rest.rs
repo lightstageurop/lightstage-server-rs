@@ -1,38 +1,61 @@
 use std::net::{IpAddr, SocketAddr};
 
-use axum::{Json, Router, extract::State, routing::post};
-use serde::Deserialize;
+use axum::{Json, extract::State};
 use tokio::net::TcpListener;
 use tracing::info;
+use utoipa::OpenApi;
+use utoipa_axum::{router::OpenApiRouter, routes};
+use utoipa_rapidoc::RapiDoc;
+use utoipa_swagger_ui::SwaggerUi;
 
 use crate::state::{SharedState, StageMode, StageState};
-
-#[derive(Deserialize)]
-struct ModeRequest {
-    mode: StageMode,
-}
+#[derive(OpenApi)]
+// #[openapi()]
+struct ApiDoc;
 
 pub async fn start_server(addr: IpAddr, port: u16, state: SharedState) {
-    let app = Router::new()
-        .route("/api/mode", post(set_mode))
-        .route("/api/manual/frame", post(set_manual_frame))
+    let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .routes(routes!(get_mode, set_mode))
+        .routes(routes!(set_manual_frame))
+        .split_for_parts();
+
+    // host swagger / rapidocs
+    let app = router
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api))
+        // the swagger router is already hosting the openapi spec so we can just do:
+        .merge(RapiDoc::new("/api-docs/openapi.json").path("/rapidoc"))
+        // if we drop swagger we would otherwise do:
+        // .merge(RapiDoc::with_url(
+        //     "/rapidoc",
+        //     "/apid-docs/openapi.json",
+        //     api,
+        // ))
         .with_state(state);
+
     // TODO make base path (ie. `/api/`) configurable
 
+    // from config
     let addr = SocketAddr::new(addr, port);
     info!("Starting REST API. Listening on http://{addr}");
 
+    // serve
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
-/// POST `/api/mode`
-async fn set_mode(State(state): State<SharedState>, Json(payload): Json<ModeRequest>) {
-    let mut lock = state.write().unwrap();
-    lock.mode = payload.mode;
+#[utoipa::path(get, path = "/api/mode")]
+async fn get_mode(State(state): State<SharedState>) -> Json<StageMode> {
+    let lock = state.read().unwrap();
+    Json(lock.mode)
 }
 
-/// POST `/api/manual/frame`
+#[utoipa::path(post, path = "/api/mode")]
+async fn set_mode(State(state): State<SharedState>, Json(payload): Json<StageMode>) {
+    let mut lock = state.write().unwrap();
+    lock.mode = payload;
+}
+
+#[utoipa::path(post, path = "/api/manual/frame")]
 async fn set_manual_frame(
     State(state): State<SharedState>,
     Json(frame): Json<[[[u16; 6]; 14]; 12]>, // TODO is this really a good idea?
