@@ -137,17 +137,17 @@ async fn main() -> anyhow::Result<()> {
                 sequence = sequence.wrapping_add(1);
             }
 
-            next_time += config.refresh_rate;
+            let refresh_time = Duration::from_millis(config.refresh_rate_ms);
+            next_time += refresh_time;
 
             let now = Instant::now();
             if next_time > now {
                 thread::sleep(next_time - now);
             } else {
-                let lateness =
-                    now.duration_since(next_time.checked_sub(config.refresh_rate).unwrap());
+                let lateness = now.duration_since(next_time.checked_sub(refresh_time).unwrap());
                 warn!(
                     "oops. frame took {lateness:?} (Target was {:?})",
-                    config.refresh_rate
+                    refresh_time
                 );
 
                 next_time = now;
