@@ -3,6 +3,7 @@ use std::net::{IpAddr, SocketAddr};
 use axum::{Json, Router, extract::State, routing::post};
 use serde::Deserialize;
 use tokio::net::TcpListener;
+use tracing::info;
 
 use crate::state::{SharedState, StageMode, StageState};
 
@@ -19,7 +20,7 @@ pub async fn start_server(addr: IpAddr, port: u16, state: SharedState) {
     // TODO make base path (ie. `/api/`) configurable
 
     let addr = SocketAddr::new(addr, port);
-    println!("Starting REST API. Listening on http://{addr}");
+    info!("Starting REST API. Listening on http://{addr}");
 
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();

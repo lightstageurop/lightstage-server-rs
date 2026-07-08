@@ -7,6 +7,8 @@ use std::{
 };
 
 use kinetrs::{DmxOutHeader, KinetPacketHeader, KinetPayload};
+use tracing::{info, warn};
+use tracing_subscriber::EnvFilter;
 
 use crate::{
     config::ServerConfig,
@@ -47,14 +49,21 @@ impl LightStageFrame {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .compact()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
+
     let config = ServerConfig::default();
 
-    println!("Starting light stage server..");
+    info!("Starting light stage server..");
 
     let raw_targets = discover_pds(config.kinet_port)?;
     let targets = map_targets(raw_targets);
 
-    println!("Discovered {} power supplies", targets.len());
+    info!("Discovered {} power supplies", targets.len());
 
     let mut renderer = Renderer::new(&config);
     for universe in 0..config.num_arcs {
@@ -136,7 +145,7 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 let lateness =
                     now.duration_since(next_time.checked_sub(config.refresh_rate).unwrap());
-                println!(
+                warn!(
                     "oops. frame took {lateness:?} (Target was {:?})",
                     config.refresh_rate
                 );
