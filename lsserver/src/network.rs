@@ -7,12 +7,14 @@ use std::{
 
 use kinetrs::{KinetPacketHeader, KinetPayload, PollPayload, PollReplyPayload};
 
+/// One of our discovered PDS on the network.
 pub struct KinetPowerSupply {
     pub remote_adr: SocketAddr,
     pub arc_index: usize,
     pub is_rgb: bool,
 }
 
+/// Discover PDS on the network with [`kinetrs::KinetPacketHeader::Poll`] and listen for replies.
 pub fn discover_pds(port: u16) -> anyhow::Result<Vec<KinetPowerSupply>> {
     let socket = UdpSocket::bind("10.37.23.200:0")?;
     let _ = socket.set_broadcast(true);
@@ -75,6 +77,9 @@ pub fn discover_pds(port: u16) -> anyhow::Result<Vec<KinetPowerSupply>> {
     Ok(discovered_targets)
 }
 
+/// Map a vec of discovered PDSs for faster lookup.
+///
+/// key: `(arc_index, is_rgb)`, value: `SocketAddr`
 pub fn map_targets(
     raw_targets: Vec<KinetPowerSupply>,
 ) -> std::collections::HashMap<(usize, bool), std::net::SocketAddr> {

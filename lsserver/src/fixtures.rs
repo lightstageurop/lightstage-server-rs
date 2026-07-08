@@ -1,3 +1,4 @@
+/// Strongly typed DMX channel address (1-512).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct DmxAddress(u16);
 
@@ -10,14 +11,20 @@ impl DmxAddress {
         }
     }
 
+    /// Returns address as zero-indexed for buffer manipulation.
     pub fn index(self) -> usize {
         self.0 as usize - 1
     }
 }
 
+/// Represents a data type that can be serialised into a DMX universe.
+///
+/// This abstracts different resolutions, eg. single-channel (`u8`) and dual-channel (`u16`) fixtures.
 pub trait DmxValue: Copy + Default {
+    /// Number of 8-bit DMX channels this value occupies.
     const CHANNELS: usize;
 
+    /// Serialise the value into provided buffer.
     fn write_to(self, dst: &mut [u8]);
 }
 
@@ -37,13 +44,19 @@ impl DmxValue for u16 {
     }
 }
 
+/// A physical light fixture capable of writing its state to a DMX universe.
 pub trait Fixture {
+    /// Total number of 8-bit DMX channels occupied by this fixture.
     fn channels(&self) -> usize;
 
+    /// Base DMX address of the fixture.
     fn address(&self) -> DmxAddress;
+
+    /// Serialise fixture state into DMX universe.
     fn write_to_universe(&self, buf: &mut [u8; 512]);
 }
 
+/// Standard 3-channel RGB fixture, eg. iColor MR gen3
 pub struct RgbFixture<T: DmxValue> {
     address: DmxAddress,
     pub r: T,
@@ -92,6 +105,7 @@ impl<T: DmxValue> Fixture for RgbFixture<T> {
     }
 }
 
+/// A 3-channel warm/neutral/cool white fixture, eg. iW MR gen3
 pub struct WhiteFixture<T: DmxValue> {
     address: DmxAddress,
     pub warm: T,
@@ -115,6 +129,7 @@ impl<T: DmxValue> WhiteFixture<T> {
         })
     }
 
+    /// Update intensity of each temperature channel of white.
     pub fn set_white(&mut self, warm: T, neutral: T, cool: T) {
         (self.warm, self.neutral, self.cool) = (warm, neutral, cool);
     }

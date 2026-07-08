@@ -3,13 +3,19 @@ use std::{
     time::Duration,
 };
 
+/// Configuration parameters for the light stage server.
+///
+/// Defines physical layout of the arcs/fixtures, network configuration of REST API, `KiNET`, etc.
 #[derive(Clone, Copy)]
 pub struct ServerConfig {
     pub num_arcs: usize,
     pub lights_per_arc: usize,
     pub kinet_port: u16,
+    /// `KiNET` / `DmxOut` refresh rate
     pub refresh_rate: Duration,
+    /// Axum REST API bind address
     pub api_ip: IpAddr,
+    /// Axum REST API port
     pub api_port: u16,
 }
 

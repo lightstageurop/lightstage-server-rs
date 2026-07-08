@@ -4,11 +4,18 @@ use serde::Deserialize;
 
 use crate::{LightStageFrame, renderer::Renderer};
 
+/// Defines the active operation mode of the light stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 pub enum StageMode {
+    /// Runs a pleasing background animation
     #[default]
     Demo,
+    /// Awaits explicitly defined frames via the API.
+    ///
+    /// Keeps refreshing the same frame if no new updates are sent.
+    /// Intended to be used for slow, or no capture. Shutter synchronisation is not guaranteed.
     Manual,
+    /// Plays back a pre-loaded sequence of frames. Used for capture.
     Playback,
 }
 
@@ -16,10 +23,11 @@ pub enum StageMode {
 pub struct StageState {
     pub mode: StageMode,
     pub renderer: Renderer,
+    /// Current frame for [`StageMode::Manual`]
     pub current_frame: LightStageFrame,
-    /// Sequence for [`StageMode::Playback`]
+    /// Loaded animation sequence for [`StageMode::Playback`]
     pub sequence: Vec<LightStageFrame>,
-    /// Current frame from sequence
+    /// Current frame index within sequence
     pub seq_index: usize,
 }
 
