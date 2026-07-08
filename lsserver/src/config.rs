@@ -6,7 +6,7 @@ use std::{
 /// Configuration parameters for the light stage server.
 ///
 /// Defines physical layout of the arcs/fixtures, network configuration of REST API, `KiNET`, etc.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, ToSchema, Serialize)]
 pub struct ServerConfig {
     pub num_arcs: usize,
     pub lights_per_arc: usize,
@@ -14,6 +14,7 @@ pub struct ServerConfig {
     /// `KiNET` / `DmxOut` refresh rate
     pub refresh_rate: Duration,
     /// Axum REST API bind address
+    #[schema(value_type = String, example = "127.0.0.1")]
     pub api_ip: IpAddr,
     /// Axum REST API port
     pub api_port: u16,
