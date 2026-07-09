@@ -1,6 +1,8 @@
 mod rest;
+mod ws;
 
 pub use rest::start_server;
+
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -14,6 +16,19 @@ use crate::{
 /// Eg. [`crate::fixtures::RgbFixture`] or [`crate::fixtures::WhiteFixture`]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 pub struct FixtureColour(u16, u16, u16);
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+struct UpdateColourRequest {
+    rgb: FixtureColour,
+    white: FixtureColour,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+struct UpdateFixturesRequest {
+    arc_idx: usize,
+    light_idx: usize,
+    colour: UpdateColourRequest,
+}
 
 /// An application service layer if you will to handle updating state.
 ///

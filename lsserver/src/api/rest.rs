@@ -3,36 +3,23 @@ use std::net::SocketAddr;
 use axum::{
     Json,
     extract::{Path, State},
+    routing::any,
 };
-use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::info;
-use utoipa::{OpenApi, ToSchema};
+use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_rapidoc::RapiDoc;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
-    api::{ApiState, FixtureColour},
+    api::{ApiState, UpdateColourRequest, UpdateFixturesRequest, ws::ws_handler},
     config::ServerConfig,
     state::{SharedState, StageMode},
 };
 
 const CONFIG_TAG: &str = "Configuration";
 const MANUAL_TAG: &str = "Manual Control";
-
-#[derive(Clone, Copy, Serialize, Deserialize, ToSchema)]
-struct UpdateColourRequest {
-    rgb: FixtureColour,
-    white: FixtureColour,
-}
-
-#[derive(Clone, Copy, Serialize, Deserialize, ToSchema)]
-struct UpdateFixturesRequest {
-    arc_idx: usize,
-    light_idx: usize,
-    colour: UpdateColourRequest,
-}
 
 #[derive(OpenApi)]
 #[openapi(info(title = "Light Stage API", description = include_str!("README.md")))]
@@ -42,6 +29,7 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
     let api_state = ApiState { state, config };
 
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .route("/ws", any(ws_handler))
         .routes(routes!(get_config))
         .routes(routes!(get_mode, set_mode))
         .routes(routes!(set_lightstage))
