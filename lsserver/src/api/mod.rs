@@ -3,6 +3,7 @@ mod rest;
 pub use rest::start_server;
 
 use crate::{
+    config::ServerConfig,
     fixtures::DmxValue,
     state::{SharedState, StageMode, StageState},
 };
@@ -19,6 +20,7 @@ pub struct FixtureColour<T: DmxValue>(T, T, T);
 pub struct ApiState {
     /// The underlying [`StageState`]
     state: SharedState,
+    config: ServerConfig,
 }
 
 impl ApiState {

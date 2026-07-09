@@ -30,7 +30,7 @@ struct AppState {
 struct ApiDoc;
 
 pub async fn start_server(config: ServerConfig, state: SharedState) {
-    let api_state = ApiState { state };
+    let api_state = ApiState { state, config };
 
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(get_config))
@@ -69,8 +69,7 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
     )
 )]
 async fn get_config(State(api): State<ApiState>) -> Json<ServerConfig> {
-    let config: &ServerConfig = todo!();
-    Json(*config)
+    Json(api.config)
 }
 
 #[utoipa::path(
