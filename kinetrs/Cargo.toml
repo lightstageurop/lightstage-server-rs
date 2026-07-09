@@ -1,11 +1,13 @@
 [package]
+  authors = ["Thomas Aldrian <aldrian.thom@proton.me"]
   description = "Philips Colour Kinetics KiNET packet format"
-  edition = "2024"
+  edition.workspace = true
   homepage = "https://github.com/lightstageurop/lightstage-server-rs/tree/master/kinetrs"
   keywords = ["dmx", "kinet", "lighting"]
   license = "MIT"
   name = "kinetrs"
   repository.workspace = true
+  rust-version.workspace = true
   version = "0.2.0"
 
 [dependencies]

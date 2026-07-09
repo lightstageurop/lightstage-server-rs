@@ -1,4 +1,8 @@
 [workspace]
   members = ["kinetrs", "lsserver"]
-  package.repository = "https://github.com/lightstageurop/lightstage-server-rs"
   resolver = "3"
+
+  [workspace.package]
+    edition = "2024"
+    repository = "https://github.com/lightstageurop/lightstage-server-rs"
+    rust-version = "1.86"
