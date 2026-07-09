@@ -1,17 +1,19 @@
 mod rest;
 
 pub use rest::start_server;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::{
     config::ServerConfig,
-    fixtures::DmxValue,
     state::{SharedState, StageMode, StageState},
 };
 
 /// Generic colour of a 3-channel fixture.
 ///
 /// Eg. [`crate::fixtures::RgbFixture`] or [`crate::fixtures::WhiteFixture`]
-pub struct FixtureColour<T: DmxValue>(T, T, T);
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+pub struct FixtureColour(u16, u16, u16);
 
 /// An application service layer if you will to handle updating state.
 ///
@@ -42,14 +44,16 @@ impl ApiState {
         &self,
         arc_idx: usize,
         light_idx: usize,
-        rgb: &FixtureColour<u16>,
-        white: &FixtureColour<u16>,
+        rgb: FixtureColour,
+        white: FixtureColour,
     ) {
-        let mut lock = self.state.write().unwrap();
-        lock.mode = StageMode::Manual;
+        {
+            let mut lock = self.state.write().unwrap();
+            lock.mode = StageMode::Manual;
 
-        lock.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
-        lock.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
+            lock.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
+            lock.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
+        }
 
         self.commit_and_render();
     }
@@ -57,15 +61,17 @@ impl ApiState {
     /// Updates colour of an entire arc uniformly.
     ///
     /// Also sets the mode to manual.
-    pub fn set_arc(&self, arc_idx: usize, rgb: &FixtureColour<u16>, white: &FixtureColour<u16>) {
-        let mut lock = self.state.write().unwrap();
-        lock.mode = StageMode::Manual;
+    pub fn set_arc(&self, arc_idx: usize, rgb: FixtureColour, white: FixtureColour) {
+        {
+            let mut lock = self.state.write().unwrap();
+            lock.mode = StageMode::Manual;
 
-        for light in &mut lock.renderer.rgb_fixtures[arc_idx] {
-            light.set_color(rgb.0, rgb.1, rgb.2);
-        }
-        for light in &mut lock.renderer.white_fixtures[arc_idx] {
-            light.set_white(white.0, white.1, white.2);
+            for light in &mut lock.renderer.rgb_fixtures[arc_idx] {
+                light.set_color(rgb.0, rgb.1, rgb.2);
+            }
+            for light in &mut lock.renderer.white_fixtures[arc_idx] {
+                light.set_white(white.0, white.1, white.2);
+            }
         }
 
         self.commit_and_render();
@@ -74,18 +80,35 @@ impl ApiState {
     /// Updates entire light stage to one uniform colour.
     ///
     /// Also sets the mode to manual.
-    pub fn set_lightstage(&self, rgb: &FixtureColour<u16>, white: &FixtureColour<u16>) {
-        let mut lock = self.state.write().unwrap();
-        lock.mode = StageMode::Manual;
+    pub fn set_lightstage(&self, rgb: FixtureColour, white: FixtureColour) {
+        {
+            let mut lock = self.state.write().unwrap();
+            lock.mode = StageMode::Manual;
 
-        for arc in &mut lock.renderer.rgb_fixtures {
-            for light in arc {
-                light.set_color(rgb.0, rgb.1, rgb.2);
+            for arc in &mut lock.renderer.rgb_fixtures {
+                for light in arc {
+                    light.set_color(rgb.0, rgb.1, rgb.2);
+                }
+            }
+            for arc in &mut lock.renderer.white_fixtures {
+                for light in arc {
+                    light.set_white(white.0, white.1, white.2);
+                }
             }
         }
-        for arc in &mut lock.renderer.white_fixtures {
-            for light in arc {
-                light.set_white(white.0, white.1, white.2);
+
+        self.commit_and_render();
+    }
+
+    pub fn set_fixtures(&self, fixtures: Vec<(usize, usize, FixtureColour, FixtureColour)>) {
+        {
+            let mut lock = self.state.write().unwrap();
+            lock.mode = StageMode::Manual;
+
+            for (arc_idx, light_idx, rgb, white) in fixtures {
+                lock.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
+                lock.renderer.white_fixtures[arc_idx][light_idx]
+                    .set_white(white.0, white.1, white.2);
             }
         }
 

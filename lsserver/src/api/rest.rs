@@ -1,32 +1,41 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 use axum::{
-    Json, Router,
-    extract::{FromRef, State},
-    routing::{get, post},
+    Json,
+    extract::{Path, State},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::info;
-use utoipa::{OpenApi, openapi::Server};
+use utoipa::{OpenApi, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_rapidoc::RapiDoc;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
-    api::ApiState,
+    api::{ApiState, FixtureColour},
     config::ServerConfig,
-    state::{SharedState, StageMode, StageState},
+    state::{SharedState, StageMode},
 };
 
-#[derive(Clone)]
-struct AppState {
-    config: Arc<ServerConfig>,
-    state: SharedState,
+const CONFIG_TAG: &str = "Configuration";
+const MANUAL_TAG: &str = "Manual Control";
+
+#[derive(Clone, Copy, Serialize, Deserialize, ToSchema)]
+struct UpdateColourRequest {
+    rgb: FixtureColour,
+    white: FixtureColour,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, ToSchema)]
+struct UpdateFixturesRequest {
+    arc_idx: usize,
+    light_idx: usize,
+    colour: UpdateColourRequest,
 }
 
 #[derive(OpenApi)]
-// #[openapi()]
+#[openapi(info(title = "Light Stage API", description = include_str!("README.md")))]
 struct ApiDoc;
 
 pub async fn start_server(config: ServerConfig, state: SharedState) {
@@ -35,14 +44,17 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(get_config))
         .routes(routes!(get_mode, set_mode))
-        .routes(routes!(set_manual_frame))
+        .routes(routes!(set_lightstage))
+        .routes(routes!(set_arc))
+        .routes(routes!(set_fixture))
+        .routes(routes!(set_fixtures))
         .split_for_parts();
 
     // host swagger / rapidocs
     let app = router
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api))
+        .merge(SwaggerUi::new("/api-docs/swagger-ui").url("/api-docs/openapi.json", api))
         // the swagger router is already hosting the openapi spec so we can just do:
-        .merge(RapiDoc::new("/api-docs/openapi.json").path("/rapidoc"))
+        .merge(RapiDoc::new("/api-docs/openapi.json").path("/api-docs/rapidoc"))
         // if we drop swagger we would otherwise do:
         // .merge(RapiDoc::with_url(
         //     "/rapidoc",
@@ -61,9 +73,11 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
     axum::serve(listener, app).await.unwrap();
 }
 
+/// Get the server's configuration
 #[utoipa::path(
     get,
     path = "/api/config",
+    tag = CONFIG_TAG,
     responses(
         (status = 200, description = "Get config success", body = ServerConfig)
     )
@@ -72,9 +86,11 @@ async fn get_config(State(api): State<ApiState>) -> Json<ServerConfig> {
     Json(api.config)
 }
 
+/// Get the current operation mode of the light stage.
 #[utoipa::path(
     get,
     path = "/api/mode",
+    tag = CONFIG_TAG,
     responses(
         (status = 200, description = "Get mode success", body = StageMode)
     )
@@ -83,9 +99,11 @@ async fn get_mode(State(api): State<ApiState>) -> Json<StageMode> {
     Json(api.get_mode())
 }
 
+/// Set the operation mode of the light stage.
 #[utoipa::path(
     post,
     path = "/api/mode",
+    tag = CONFIG_TAG,
     responses(
         (status = 200, description = "Set mode success")
     )
@@ -94,44 +112,82 @@ async fn set_mode(State(api): State<ApiState>, Json(payload): Json<StageMode>) {
     api.set_mode(payload);
 }
 
+/// Set the entire light stage to a uniform colour.
 #[utoipa::path(
-    post,
-    path = "/api/manual/frame",
+    put,
+    path = "/api/manual/all",
+    tag = MANUAL_TAG,
     responses(
-        (status = 200, description = "Set manual frame success")
+        (status = 200, description = "Set entire lightstage success")
     )
 )]
-async fn set_manual_frame(
+async fn set_lightstage(State(api): State<ApiState>, Json(payload): Json<UpdateColourRequest>) {
+    api.set_lightstage(payload.rgb, payload.white);
+}
+
+/// Set an arc to a uniform colour.
+#[utoipa::path(
+    put,
+    path = "/api/manual/arcs/{arc_idx}",
+    tag = MANUAL_TAG,
+    params(
+        ("arc_idx" = u8, Path, description = "arc id")
+    ),
+    responses(
+        (status = 200, description = "Set arc success")
+    )
+)]
+async fn set_arc(
     State(api): State<ApiState>,
-    Json(frame): Json<[[[u16; 6]; 14]; 12]>, // TODO is this really a good idea?
-                                             // also this should probably follow num_arcs, lights_per_arc in config
+    Path(arc_idx): Path<u8>,
+    Json(payload): Json<UpdateColourRequest>,
 ) {
-    let state: State<SharedState> = todo!();
-    let mut lock = state.write().unwrap();
+    api.set_arc(arc_idx as usize, payload.rgb, payload.white);
+}
 
-    // enable manual mode automatically
-    lock.mode = StageMode::Manual;
+/// Set a specific light to a colour.
+#[utoipa::path(
+    put,
+    path = "/api/manual/arcs/{arc_idx}/light/{light_idx}",
+    tag = MANUAL_TAG,
+    params(
+        ("arc_idx" = u8, Path, description = "arc id"),
+        ("light_idx" = u8, Path)
+    ),
+    responses(
+        (status = 200, description = "Set fixture success")
+    )
+)]
+async fn set_fixture(
+    State(api): State<ApiState>,
+    Path((arc_idx, light_idx)): Path<(u8, u8)>,
+    Json(payload): Json<UpdateColourRequest>,
+) {
+    api.set_fixture(
+        arc_idx as usize,
+        light_idx as usize,
+        payload.rgb,
+        payload.white,
+    );
+}
 
-    for (arc_idx, arc_data) in frame.iter().enumerate() {
-        for (light_idx, channels) in arc_data.iter().enumerate() {
-            lock.renderer.rgb_fixtures[arc_idx][light_idx].set_color(
-                channels[0],
-                channels[1],
-                channels[2],
-            );
-            lock.renderer.white_fixtures[arc_idx][light_idx].set_white(
-                channels[3],
-                channels[4],
-                channels[5],
-            );
-        }
-    }
-
-    // TODO this should probably be a `update_and_render` method on StageState instead of doing this everywhere.
-    let StageState {
-        renderer,
-        current_frame,
-        ..
-    } = &mut *lock;
-    renderer.update(current_frame);
+/// Update multiple fixtures' colours.
+#[utoipa::path(
+    patch,
+    path = "/api/manual/fixtures",
+    tag = MANUAL_TAG,
+    responses(
+        (status = 200, description = "Set fixtures success")
+    )
+)]
+async fn set_fixtures(
+    State(api): State<ApiState>,
+    Json(payload): Json<Vec<UpdateFixturesRequest>>,
+) {
+    api.set_fixtures(
+        payload
+            .iter()
+            .map(|req| (req.arc_idx, req.light_idx, req.colour.rgb, req.colour.white))
+            .collect(),
+    );
 }
