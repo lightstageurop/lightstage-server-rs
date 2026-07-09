@@ -1,17 +1,20 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    Json,
+    Json, Router,
     extract::{FromRef, State},
+    routing::{get, post},
 };
+use serde::Deserialize;
 use tokio::net::TcpListener;
 use tracing::info;
-use utoipa::OpenApi;
+use utoipa::{OpenApi, openapi::Server};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_rapidoc::RapiDoc;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
+    api::ApiState,
     config::ServerConfig,
     state::{SharedState, StageMode, StageState},
 };
@@ -22,27 +25,12 @@ struct AppState {
     state: SharedState,
 }
 
-impl FromRef<AppState> for SharedState {
-    fn from_ref(app_state: &AppState) -> Self {
-        app_state.state.clone()
-    }
-}
-
-impl FromRef<AppState> for Arc<ServerConfig> {
-    fn from_ref(app_state: &AppState) -> Self {
-        app_state.config.clone()
-    }
-}
-
 #[derive(OpenApi)]
 // #[openapi()]
 struct ApiDoc;
 
 pub async fn start_server(config: ServerConfig, state: SharedState) {
-    let app_state = AppState {
-        config: Arc::new(config),
-        state,
-    };
+    let api_state = ApiState { state };
 
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(get_config))
@@ -61,8 +49,7 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
         //     "/apid-docs/openapi.json",
         //     api,
         // ))
-        .with_state(app_state);
-
+        .with_state(api_state);
     // TODO make base path (ie. `/api/`) configurable
 
     // from config
@@ -81,7 +68,8 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
         (status = 200, description = "Get config success", body = ServerConfig)
     )
 )]
-async fn get_config(State(config): State<Arc<ServerConfig>>) -> Json<ServerConfig> {
+async fn get_config(State(api): State<ApiState>) -> Json<ServerConfig> {
+    let config: &ServerConfig = todo!();
     Json(*config)
 }
 
@@ -92,9 +80,8 @@ async fn get_config(State(config): State<Arc<ServerConfig>>) -> Json<ServerConfi
         (status = 200, description = "Get mode success", body = StageMode)
     )
 )]
-async fn get_mode(State(state): State<SharedState>) -> Json<StageMode> {
-    let lock = state.read().unwrap();
-    Json(lock.mode)
+async fn get_mode(State(api): State<ApiState>) -> Json<StageMode> {
+    Json(api.get_mode())
 }
 
 #[utoipa::path(
@@ -104,9 +91,8 @@ async fn get_mode(State(state): State<SharedState>) -> Json<StageMode> {
         (status = 200, description = "Set mode success")
     )
 )]
-async fn set_mode(State(state): State<SharedState>, Json(payload): Json<StageMode>) {
-    let mut lock = state.write().unwrap();
-    lock.mode = payload;
+async fn set_mode(State(api): State<ApiState>, Json(payload): Json<StageMode>) {
+    api.set_mode(payload);
 }
 
 #[utoipa::path(
@@ -117,10 +103,11 @@ async fn set_mode(State(state): State<SharedState>, Json(payload): Json<StageMod
     )
 )]
 async fn set_manual_frame(
-    State(state): State<SharedState>,
+    State(api): State<ApiState>,
     Json(frame): Json<[[[u16; 6]; 14]; 12]>, // TODO is this really a good idea?
                                              // also this should probably follow num_arcs, lights_per_arc in config
 ) {
+    let state: State<SharedState> = todo!();
     let mut lock = state.write().unwrap();
 
     // enable manual mode automatically
