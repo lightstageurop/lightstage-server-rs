@@ -57,7 +57,24 @@ impl KinetPayload for PollPayload {
     where
         Self: Sized,
     {
-        todo!()
+        let mut seq_bytes = [0u8; 4];
+        let mut ip_bytes = [0u8; 4];
+        let mut reserved = [0u8; 2];
+        if reserved != [0u8; 2] {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "reserved bytes must be zero",
+            ));
+        }
+
+        reader.read_exact(&mut seq_bytes)?;
+        reader.read_exact(&mut ip_bytes)?;
+        reader.read_exact(&mut reserved)?;
+
+        Ok(Self {
+            sequence: u32::from_le_bytes(seq_bytes),
+            magic_ip: Ipv4Addr::from(ip_bytes),
+        })
     }
 }
 
@@ -230,7 +247,28 @@ impl KinetPayload for HeartBeatPayload {
     where
         Self: Sized,
     {
-        todo!()
+        let mut seq_bytes = [0u8; 4];
+        let mut ip_bytes = [0u8; 4];
+        let mut mac = [0u8; 6];
+        let mut data16_bytes = [0u8; 2];
+        let mut serial_bytes = [0u8; 4];
+        let mut data32_bytes = [0u8; 4];
+
+        reader.read_exact(&mut seq_bytes)?;
+        reader.read_exact(&mut ip_bytes)?;
+        reader.read_exact(&mut mac)?;
+        reader.read_exact(&mut data16_bytes)?;
+        reader.read_exact(&mut serial_bytes)?;
+        reader.read_exact(&mut data32_bytes)?;
+
+        Ok(Self {
+            sequence: u32::from_le_bytes(seq_bytes),
+            src_ip: Ipv4Addr::from(ip_bytes),
+            mac,
+            data16: u16::from_le_bytes(data16_bytes),
+            serial: u32::from_le_bytes(serial_bytes),
+            data32: u32::from_le_bytes(data32_bytes),
+        })
     }
 }
 
@@ -281,7 +319,27 @@ impl KinetPayload for DmxOutHeader {
     where
         Self: Sized,
     {
-        todo!()
+        let mut seq_bytes = [0u8; 4];
+        let mut port_byte = [0u8; 1];
+        let mut padding_byte = [0u8; 1];
+        let mut flags_bytes = [0u8; 2];
+        let mut timer_bytes = [0u8; 4];
+        let mut universe_byte = [0u8; 1];
+
+        reader.read_exact(&mut seq_bytes)?;
+        reader.read_exact(&mut port_byte)?;
+        reader.read_exact(&mut padding_byte)?;
+        reader.read_exact(&mut flags_bytes)?;
+        reader.read_exact(&mut timer_bytes)?;
+        reader.read_exact(&mut universe_byte)?;
+
+        Ok(Self {
+            sequence: u32::from_le_bytes(seq_bytes),
+            port: port_byte[0],
+            flags: u16::from_le_bytes(flags_bytes),
+            timer_val: u32::from_le_bytes(timer_bytes),
+            universe: universe_byte[0],
+        })
     }
 }
 
