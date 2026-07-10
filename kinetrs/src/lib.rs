@@ -37,11 +37,9 @@ mod payload;
 
 use std::io;
 
-pub use packet::KinetPacketHeader;
+pub use packet::{KinetPacketHeader, KinetPacketType};
 pub use payload::{DmxOutHeader, HeartBeatPayload, KinetPayload, PollPayload, PollReplyPayload};
 use thiserror::Error;
-
-use crate::packet::KinetPacketType;
 
 /// Default target UDP port
 pub const KINET_UDP_PORT: u16 = 6038;

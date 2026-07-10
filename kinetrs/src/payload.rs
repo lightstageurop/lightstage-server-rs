@@ -60,16 +60,16 @@ impl KinetPayload for PollPayload {
         let mut seq_bytes = [0u8; 4];
         let mut ip_bytes = [0u8; 4];
         let mut reserved = [0u8; 2];
+
+        reader.read_exact(&mut seq_bytes)?;
+        reader.read_exact(&mut ip_bytes)?;
+        reader.read_exact(&mut reserved)?;
         if reserved != [0u8; 2] {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "reserved bytes must be zero",
             ));
         }
-
-        reader.read_exact(&mut seq_bytes)?;
-        reader.read_exact(&mut ip_bytes)?;
-        reader.read_exact(&mut reserved)?;
 
         Ok(Self {
             sequence: u32::from_le_bytes(seq_bytes),
