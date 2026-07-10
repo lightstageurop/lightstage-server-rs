@@ -25,7 +25,7 @@ mod renderer;
 mod state;
 mod universe;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct LightStageFrame {
     pub rgb_universes: [[u8; 512]; 12], // TODO dont hard code
     pub white_universes: [[u8; 512]; 12],
@@ -102,17 +102,20 @@ async fn main() -> anyhow::Result<()> {
                     }
                 };
 
+                let header: KinetPacketHeader = DmxOutHeader {
+                    sequence,
+                    ..Default::default()
+                }
+                .into();
+                header
+                    .write_to(&mut Cursor::new(&mut packet[0..DmxOutHeader::PACKET_SIZE]))
+                    .expect("failed to serialise");
+
                 for arc in 0..config.num_arcs {
                     if let Some(rgb_addr) = targets.get(&(arc, true)) {
                         let universe = frame.rgb_universes[arc];
-                        let header = KinetPacketHeader::DmxOut(DmxOutHeader {
-                            sequence,
-                            ..Default::default()
-                        });
-                        header
-                            .write_to(&mut Cursor::new(&mut packet[0..21]))
-                            .expect("failed to serialise");
-                        packet[21..].copy_from_slice(&universe);
+
+                        packet[DmxOutHeader::PACKET_SIZE..].copy_from_slice(&universe);
                         socket
                             .send_to(&packet, rgb_addr)
                             .expect("failed to send rgb");
@@ -120,14 +123,7 @@ async fn main() -> anyhow::Result<()> {
 
                     if let Some(white_addr) = targets.get(&(arc, false)) {
                         let universe = frame.white_universes[arc];
-                        let header = KinetPacketHeader::DmxOut(DmxOutHeader {
-                            sequence,
-                            ..Default::default()
-                        });
-                        header
-                            .write_to(&mut Cursor::new(&mut packet[0..21]))
-                            .expect("failed to serialise");
-                        packet[21..].copy_from_slice(&universe);
+                        packet[DmxOutHeader::PACKET_SIZE..].copy_from_slice(&universe);
                         socket
                             .send_to(&packet, white_addr)
                             .expect("failed to send white");
@@ -158,7 +154,7 @@ async fn main() -> anyhow::Result<()> {
     // {
     //     let state = state.clone();
     //     thread::spawn(move || {
-    //         for arc in 0..12 {
+    //         for arc in 0..config.num_arcs {
     //             for light in 0..config.lights_per_arc {
     //                 renderer.rgb_fixtures[arc][light].set_color(0, 65535, 0);
     //                 renderer.white_fixtures[arc][light].set_white(0, 0, 65535);
@@ -194,7 +190,7 @@ async fn main() -> anyhow::Result<()> {
             if state_render.read().unwrap().mode == StageMode::Demo {
                 let elapsed = start_time.elapsed().as_secs_f32();
 
-                for arc in 0..12 {
+                for arc in 0..config.num_arcs {
                     for light in 0..config.lights_per_arc {
                         let phase_offset = (arc as f32 * 0.5) + (light as f32 * 0.2);
                         let t = elapsed * 2.0 + phase_offset;
