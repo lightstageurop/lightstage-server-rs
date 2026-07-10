@@ -7,21 +7,30 @@ use crate::{
     payload::{DmxOutHeader, HeartBeatPayload, KinetPayload, PollPayload, PollReplyPayload},
 };
 
+/// Raw u16 packet type identifiers.
+#[doc(hidden)]
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u16)]
 pub enum KinetPacketType {
-    Poll = 0x0001,      // DiscoverSupplies
-    PollReply = 0x0002, // DiscoverSuppliesReply
+    /// Raw protocol identifier for [`KinetPacketHeader::Poll`]
+    Poll = 0x0001,
+    /// Raw protocol identifier for [`KinetPacketHeader::PollReply`]
+    PollReply = 0x0002,
     SetIp = 0x0003,
     SetUniverse = 0x0005,
     SetName = 0x0006,
+    /// Raw protocol identifier for [`KinetPacketHeader::HeartBeat`]
     HeartBeat = 0x0008,
+    /// Raw protocol identifier for [`KinetPacketHeader::DmxOut`]
     DmxOut = 0x0101,
     // PortOut = 0x0108,
     // PortOutSync = 0x0109,
     DiscoverFixturesSerialRequest = 0x0201,
+    /// Fixture serial number reply
     DiscoverFixturesSerialReply = 0x0202,
-    DiscoverFixturesChannelRequest = 0x0203, // get dmx address
+    /// Get DMX address (and other configuration?) from fixture.
+    DiscoverFixturesChannelRequest = 0x0203,
 }
 
 /// Serialisable packets

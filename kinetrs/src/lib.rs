@@ -46,23 +46,30 @@ use crate::packet::KinetPacketType;
 /// Default target UDP port
 pub const KINET_UDP_PORT: u16 = 6038;
 
+/// Errors that can occur from deserialisation or conversions.
 #[derive(Debug, Error)]
 pub enum KinetError {
+    /// An IO error.
     #[error("IO Error: {0}")]
     Io(#[from] io::Error),
 
+    /// Packet header does not start with mandatory magic sequence.
     #[error("Invalid KiNET magic: {0:#0X}")]
     InvalidMagic(u32),
 
+    /// Specified a protocol version other than 1 (`0x0001`).
     #[error("Unsupported KiNET version: {0}")]
     UnsupportedVersion(u16),
 
+    /// Received a packet type code that is unrecognised.
     #[error("Unknown KiNET packet type identifier: {0:#06X}")]
     UnknownPacketType(u16),
 
+    /// Valid packet code detected, but parsing hasn't been implemented by this library yet.
     #[error("KiNET packet type {0:?} is recognised, but unimplemented.")]
     UnimplementedPacketType(KinetPacketType),
 
+    /// A type conversion failed ([`TryFrom`]) because we held a different variant than requested.
     #[error("Mismatched packet types: expected {expected:?}, got {actual:?}")]
     MismatchedPacketType {
         expected: KinetPacketType,
