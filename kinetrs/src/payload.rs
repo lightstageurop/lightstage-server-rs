@@ -345,6 +345,8 @@ impl KinetPayload for DmxOutHeader {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+
     use super::*;
 
     fn assert_payload_size<T: KinetPayload + Default>(name: &str) {
@@ -357,11 +359,75 @@ mod tests {
         );
     }
 
+    fn assert_roundtrip<T: KinetPayload + PartialEq + Debug>(original: T) {
+        let mut write_buf = Vec::new();
+        original.write_to(&mut write_buf).unwrap();
+
+        let mut read_cursor = &write_buf[..];
+        let deserialised =
+            T::read_from(&mut read_cursor).expect("Failed to deserialise serialised packet!");
+
+        assert_eq!(original, deserialised, "Round-trip packets mismatched!");
+        assert!(
+            read_cursor.is_empty(),
+            "Deserialisation did not consume all bytes of serialised data!"
+        );
+    }
+
     #[test]
     fn test_payload_sizes_match_constants() {
         assert_payload_size::<PollPayload>("PollPayload");
         assert_payload_size::<PollReplyPayload>("PollReplyPayload");
         assert_payload_size::<HeartBeatPayload>("HeartBeatPayload");
         assert_payload_size::<DmxOutHeader>("DmxOutHeader");
+    }
+
+    #[test]
+    fn test_poll_roundtrip() {
+        assert_roundtrip(PollPayload {
+            sequence: 4242,
+            magic_ip: Ipv4Addr::new(10, 37, 1, 2),
+        });
+    }
+
+    #[test]
+    fn test_pollreply_roundtrip() {
+        let mut node_name = [0u8; 60];
+        let name_str = b"Generic Power Supply Name";
+        node_name[..name_str.len()].copy_from_slice(name_str);
+
+        let mut node_label = [0u8; 33];
+        let label_str = b"Generic Power Supply Label";
+        node_label[..label_str.len()].copy_from_slice(label_str);
+
+        assert_roundtrip(PollReplyPayload {
+            sequence: 0,
+            src_ip: Ipv4Addr::new(10, 37, 3, 4),
+            mac: [0x00, 0x0a, 0xc5, 0x65, 0x43, 0x21],
+            data: 0x0001,
+            serial: 0x3D00_1234,
+            node_name,
+            node_label,
+        });
+    }
+
+    #[test]
+    fn test_heartbeat_roundtrip() {
+        assert_roundtrip(HeartBeatPayload {
+            sequence: 0,
+            src_ip: Ipv4Addr::new(10, 37, 120, 230),
+            mac: [0x00, 0x0a, 0xc5, 0x12, 0x34, 0x56],
+            data16: 0x0001,
+            serial: 0x3D00_4242,
+            data32: 0x0003_0001,
+        });
+    }
+
+    #[test]
+    fn test_dmxout_roundtrip() {
+        assert_roundtrip(DmxOutHeader {
+            sequence: 420_420,
+            ..Default::default()
+        });
     }
 }
