@@ -2,6 +2,7 @@
   authors = ["Thomas Aldrian <thomas.aldrian24@imperial.ac.uk>"]
   description = "Light Stage Control Server"
   edition.workspace = true
+  license = "MIT"
   name = "lsserver"
   publish = false
   rust-version.workspace = true
