@@ -12,6 +12,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     config::ServerConfig,
+    demo::DemoAnimator,
     network::{discover_pds, map_targets},
     renderer::Renderer,
     state::{SharedState, StageMode, StageState},
@@ -19,6 +20,7 @@ use crate::{
 
 mod api;
 mod config;
+mod demo;
 mod fixtures;
 mod network;
 mod renderer;
@@ -171,57 +173,18 @@ async fn main() -> anyhow::Result<()> {
 
     let state_render = state.clone();
 
-    // this following is chatgpt's doing not mine
-    // it's pretty.
-    // i don't trust it.
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(500));
 
-        let start_time = Instant::now();
-
-        // Adjust this value between 0.0 (off) and 1.0 (full blast)
-        let brightness: f32 = 0.1;
-
-        // Pre-calculate our sine wave boundaries based on the brightness
-        let amplitude = 32767.5 * brightness;
-        let center = 32767.5 * brightness;
+        let animator = DemoAnimator::new(0.1);
 
         loop {
-            if state_render.read().unwrap().mode == StageMode::Demo {
-                let elapsed = start_time.elapsed().as_secs_f32();
-
-                for arc in 0..config.num_arcs {
-                    for light in 0..config.lights_per_arc {
-                        let phase_offset = (arc as f32 * 0.5) + (light as f32 * 0.2);
-                        let t = elapsed * 2.0 + phase_offset;
-
-                        // Calculate RGB using the new dimmed amplitude and center
-                        let r = ((t).sin() * amplitude + center) as u16;
-                        let g = ((t + 2.094).sin() * amplitude + center) as u16;
-                        let b = ((t + 4.188).sin() * amplitude + center) as u16;
-
-                        state_render.write().unwrap().renderer.rgb_fixtures[arc][light]
-                            .set_color(r, g, b);
-
-                        // Apply the same dimming to the white fixtures
-                        let w_phase = elapsed * 1.5 - phase_offset;
-                        let w = ((w_phase.sin() * amplitude) + center) as u16;
-                        state_render.write().unwrap().renderer.white_fixtures[arc][light]
-                            .set_white(w, w, w);
-                    }
-                }
-
-                {
-                    let mut state_e = state_render.write().unwrap();
-                    let StageState {
-                        renderer,
-                        current_frame,
-                        ..
-                    } = &mut *state_e;
-                    renderer.update(current_frame);
+            {
+                let mut lock = state_render.write().unwrap();
+                if lock.mode == StageMode::Demo {
+                    animator.tick(&mut lock, &config);
                 }
             }
-
             thread::sleep(Duration::from_millis(10));
         }
     });
