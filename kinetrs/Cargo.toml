@@ -12,3 +12,4 @@
 
 [dependencies]
   num_enum = "0.7.6"
+  thiserror = "2.0.18"

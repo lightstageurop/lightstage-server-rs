@@ -2,12 +2,14 @@ use std::io::{self, Write};
 
 use num_enum::TryFromPrimitive;
 
-use crate::payload::{DmxOutHeader, HeartBeatPayload, KinetPayload, PollPayload, PollReplyPayload};
+use crate::{
+    KinetError,
+    payload::{DmxOutHeader, HeartBeatPayload, KinetPayload, PollPayload, PollReplyPayload},
+};
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u16)]
-enum KinetPacketType {
+pub enum KinetPacketType {
     Poll = 0x0001,      // DiscoverSupplies
     PollReply = 0x0002, // DiscoverSuppliesReply
     SetIp = 0x0003,
@@ -49,7 +51,8 @@ impl KinetPacketHeader {
     const KINET_VERSION_1: u16 = 0x0001;
     pub const HEADER_SIZE: usize = 8;
 
-    fn kind(&self) -> KinetPacketType {
+    #[must_use]
+    pub fn kind(&self) -> KinetPacketType {
         match self {
             Self::Poll(_) => KinetPacketType::Poll,
             Self::PollReply(_) => KinetPacketType::PollReply,
@@ -89,7 +92,7 @@ impl KinetPacketHeader {
         Ok(())
     }
 
-    pub fn read_from<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+    pub fn read_from<R: io::Read>(reader: &mut R) -> Result<Self, KinetError> {
         let mut magic_bytes = [0u8; 4];
         let mut version_bytes = [0u8; 2];
         let mut kind_bytes = [0u8; 2];
@@ -101,39 +104,26 @@ impl KinetPacketHeader {
         // validate magic
         let magic = u32::from_be_bytes(magic_bytes);
         if magic != Self::KINET_MAGIC {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Invalid KiNET magic: {magic:#0X}"),
-            ));
+            return Err(KinetError::InvalidMagic(magic));
         }
 
         // validate version
         let version = u16::from_le_bytes(version_bytes);
         if version != Self::KINET_VERSION_1 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Unsupported KiNET version: {version}"),
-            ));
+            return Err(KinetError::UnsupportedVersion(version));
         }
 
         // parse type
         let kind_value = u16::from_le_bytes(kind_bytes);
-        let kind = KinetPacketType::try_from(kind_value).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Unknown KiNET packet type identifier: {kind_value:#06X}"),
-            )
-        })?;
+        let kind = KinetPacketType::try_from(kind_value)
+            .map_err(|_| KinetError::UnknownPacketType(kind_value))?;
 
         match kind {
             KinetPacketType::Poll => Ok(Self::Poll(PollPayload::read_from(reader)?)),
             KinetPacketType::PollReply => Ok(Self::PollReply(PollReplyPayload::read_from(reader)?)),
             KinetPacketType::HeartBeat => Ok(Self::HeartBeat(HeartBeatPayload::read_from(reader)?)),
             KinetPacketType::DmxOut => Ok(Self::DmxOut(DmxOutHeader::read_from(reader)?)),
-            unhandled => Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                format!("KiNET packet type {unhandled:?} is recognised, but unimplemented."),
-            )),
+            unhandled => Err(KinetError::UnimplementedPacketType(unhandled)),
         }
     }
 }

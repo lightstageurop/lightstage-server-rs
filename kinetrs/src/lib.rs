@@ -35,8 +35,37 @@ mod fixtures;
 mod packet;
 mod payload;
 
+use std::io;
+
 pub use packet::KinetPacketHeader;
 pub use payload::{DmxOutHeader, HeartBeatPayload, KinetPayload, PollPayload, PollReplyPayload};
+use thiserror::Error;
+
+use crate::packet::KinetPacketType;
 
 /// Default target UDP port
 pub const KINET_UDP_PORT: u16 = 6038;
+
+#[derive(Debug, Error)]
+pub enum KinetError {
+    #[error("IO Error: {0}")]
+    Io(#[from] io::Error),
+
+    #[error("Invalid KiNET magic: {0:#0X}")]
+    InvalidMagic(u32),
+
+    #[error("Unsupported KiNET version: {0}")]
+    UnsupportedVersion(u16),
+
+    #[error("Unknown KiNET packet type identifier: {0:#06X}")]
+    UnknownPacketType(u16),
+
+    #[error("KiNET packet type {0:?} is recognised, but unimplemented.")]
+    UnimplementedPacketType(KinetPacketType),
+
+    #[error("Mismatched packet types: expected {expected:?}, got {actual:?}")]
+    MismatchedPacketType {
+        expected: KinetPacketType,
+        actual: KinetPacketType,
+    },
+}
