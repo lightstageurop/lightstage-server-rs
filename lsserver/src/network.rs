@@ -41,12 +41,13 @@ pub fn discover_pds(port: u16) -> anyhow::Result<Vec<KinetPowerSupply>> {
     socket.set_read_timeout(Some(Duration::from_millis(100)))?;
 
     // Outbound discovery packet
-    let poll_packet = KinetPacketHeader::Poll(PollPayload {
+    let poll_packet: KinetPacketHeader = PollPayload {
         // This cannot be 0.0.0.0 or 255.255.255.255 otherwise the replies will never reach us.
         // It doesn't technically have to be on the correct subnet however.
         magic_ip: Ipv4Addr::new(10, 37, 1, 1),
         ..Default::default()
-    });
+    }
+    .into();
 
     // Serialise and send it
     let mut buf = Vec::new();

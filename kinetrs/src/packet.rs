@@ -46,6 +46,36 @@ pub enum KinetPacketHeader {
     DmxOut(DmxOutHeader),
 }
 
+macro_rules! impl_packet_payload_conversion {
+    ($payload:ident, $variant:ident) => {
+        impl From<$payload> for KinetPacketHeader {
+            fn from(payload: $payload) -> Self {
+                Self::$variant(payload)
+            }
+        }
+
+        impl TryFrom<KinetPacketHeader> for $payload {
+            type Error = KinetError;
+
+            fn try_from(header: KinetPacketHeader) -> Result<Self, Self::Error> {
+                if let KinetPacketHeader::$variant(payload) = header {
+                    Ok(payload)
+                } else {
+                    Err(KinetError::MismatchedPacketType {
+                        expected: KinetPacketType::$variant,
+                        actual: header.kind(),
+                    })
+                }
+            }
+        }
+    };
+}
+
+impl_packet_payload_conversion!(PollPayload, Poll);
+impl_packet_payload_conversion!(PollReplyPayload, PollReply);
+impl_packet_payload_conversion!(HeartBeatPayload, HeartBeat);
+impl_packet_payload_conversion!(DmxOutHeader, DmxOut);
+
 impl KinetPacketHeader {
     const KINET_MAGIC: u32 = 0x0401_DC4A;
     const KINET_VERSION_1: u16 = 0x0001;
