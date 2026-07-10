@@ -1,3 +1,8 @@
+//! # Light Stage API(s)
+//!
+//! Curently we provide two ways to interact with the server:
+//! [WebSocket][crate::api::ws] and [REST][crate::api::rest]
+
 mod rest;
 mod ws;
 

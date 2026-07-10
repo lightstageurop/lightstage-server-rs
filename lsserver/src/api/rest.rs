@@ -1,3 +1,22 @@
+//! # REST API
+//!
+//! This interface will provide reduced functionality as opposed to WebSocket [`crate::api::ws`],
+//! which should be preferred where possible.
+//!
+//! All messages are encoded using JSON, such that it can be used in many contexts without
+//! requiring external dependencies on CBOR (de)serialisation, as is the case with the WebSocket API.
+//!
+//! ## `OpenAPI` Specification
+//!
+//! When the server is running, the API reference (Swagger UI) can be found at
+//! [`http://{host}:{port}/api-docs/swagger-ui/`][local-swagger].
+//! Alternatively, rapidoc is also available under [`/api-docs/rapidoc`][local-rapidoc], or see the
+//! specification itself under [`/api-docs/openapi.json`][local-spec]
+//!
+//! [local-swagger]: http://127.0.0.1:8080/api-docs/swagger-ui/
+//! [local-rapidoc]: http://127.0.0.1:8080/api-docs/rapidoc
+//! [local-spec]: http://127.0.0.1:8080/api-docs/openapi.json
+
 use std::net::SocketAddr;
 
 use axum::{
@@ -62,6 +81,8 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
 }
 
 /// Get the server's configuration
+///
+/// Counterpart to [`crate::api::ws::WsCommand::GetConfig`]
 #[utoipa::path(
     get,
     path = "/api/config",
@@ -75,6 +96,8 @@ async fn get_config(State(api): State<ApiState>) -> Json<ServerConfig> {
 }
 
 /// Get the current operation mode of the light stage.
+///
+/// Counterpart to [`crate::api::ws::WsCommand::GetMode`]
 #[utoipa::path(
     get,
     path = "/api/mode",
@@ -88,6 +111,8 @@ async fn get_mode(State(api): State<ApiState>) -> Json<StageMode> {
 }
 
 /// Set the operation mode of the light stage.
+///
+/// Counterpart to [`crate::api::ws::WsCommand::SetMode`]
 #[utoipa::path(
     post,
     path = "/api/mode",
@@ -101,6 +126,8 @@ async fn set_mode(State(api): State<ApiState>, Json(payload): Json<StageMode>) {
 }
 
 /// Set the entire light stage to a uniform colour.
+///
+/// Counterpart to [`crate::api::ws::WsCommand::SetLightstage`]
 #[utoipa::path(
     put,
     path = "/api/manual/all",
@@ -114,6 +141,8 @@ async fn set_lightstage(State(api): State<ApiState>, Json(payload): Json<UpdateC
 }
 
 /// Set an arc to a uniform colour.
+///
+/// Counterpart to [`crate::api::ws::WsCommand::SetArc`]
 #[utoipa::path(
     put,
     path = "/api/manual/arcs/{arc_idx}",
@@ -134,6 +163,8 @@ async fn set_arc(
 }
 
 /// Set a specific light to a colour.
+///
+/// Counterpart to [`crate::api::ws::WsCommand::SetFixture`]
 #[utoipa::path(
     put,
     path = "/api/manual/arcs/{arc_idx}/light/{light_idx}",
@@ -160,6 +191,8 @@ async fn set_fixture(
 }
 
 /// Update multiple fixtures' colours.
+///
+/// Counterpart to [`crate::api::ws::WsCommand::SetFixtures`]
 #[utoipa::path(
     patch,
     path = "/api/manual/fixtures",
