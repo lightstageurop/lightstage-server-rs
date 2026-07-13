@@ -22,6 +22,12 @@ use crate::{
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 pub struct FixtureColour(u16, u16, u16);
 
+impl From<FixtureColour> for (u16, u16, u16) {
+    fn from(c: FixtureColour) -> Self {
+        (c.0, c.1, c.2)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 struct UpdateColourRequest {
     rgb: FixtureColour,
@@ -67,83 +73,43 @@ impl ApiState {
         rgb: FixtureColour,
         white: FixtureColour,
     ) {
-        {
-            let mut lock = self.state.write().unwrap();
-            lock.mode = StageMode::Manual;
-
-            lock.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
-            lock.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
-        }
-
-        self.commit_and_render();
+        self.state
+            .write()
+            .unwrap()
+            .update_rgb_and_white_single_fixture(arc_idx, light_idx, rgb.into(), white.into());
     }
 
     /// Updates colour of an entire arc uniformly.
     ///
     /// Also sets the mode to manual.
     pub fn set_arc(&self, arc_idx: usize, rgb: FixtureColour, white: FixtureColour) {
-        {
-            let mut lock = self.state.write().unwrap();
-            lock.mode = StageMode::Manual;
-
-            for light in &mut lock.renderer.rgb_fixtures[arc_idx] {
-                light.set_color(rgb.0, rgb.1, rgb.2);
-            }
-            for light in &mut lock.renderer.white_fixtures[arc_idx] {
-                light.set_white(white.0, white.1, white.2);
-            }
-        }
-
-        self.commit_and_render();
+        self.state
+            .write()
+            .unwrap()
+            .update_rgb_and_white_arc(arc_idx, rgb.into(), white.into());
     }
 
     /// Updates entire light stage to one uniform colour.
     ///
     /// Also sets the mode to manual.
     pub fn set_lightstage(&self, rgb: FixtureColour, white: FixtureColour) {
-        {
-            let mut lock = self.state.write().unwrap();
-            lock.mode = StageMode::Manual;
-
-            for arc in &mut lock.renderer.rgb_fixtures {
-                for light in arc {
-                    light.set_color(rgb.0, rgb.1, rgb.2);
-                }
-            }
-            for arc in &mut lock.renderer.white_fixtures {
-                for light in arc {
-                    light.set_white(white.0, white.1, white.2);
-                }
-            }
-        }
-
-        self.commit_and_render();
+        self.state
+            .write()
+            .unwrap()
+            .update_rgb_and_white_stage(rgb.into(), white.into());
     }
 
+    /// Batch updates some fixtures.
+    ///
+    /// Also sets the mode to manual.
     pub fn set_fixtures(&self, fixtures: Vec<(usize, usize, FixtureColour, FixtureColour)>) {
-        {
-            let mut lock = self.state.write().unwrap();
-            lock.mode = StageMode::Manual;
+        let mapped = fixtures
+            .into_iter()
+            .map(|(a, l, r, w)| (a, l, r.into(), w.into()));
 
-            for (arc_idx, light_idx, rgb, white) in fixtures {
-                lock.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
-                lock.renderer.white_fixtures[arc_idx][light_idx]
-                    .set_white(white.0, white.1, white.2);
-            }
-        }
-
-        self.commit_and_render();
-    }
-
-    /// Commits all pending fixture changes and calls [`crate::renderer::Renderer::update`].
-    fn commit_and_render(&self) {
-        // TODO should this be a method on StageState instead of doing this here?
-        let mut lock = self.state.write().unwrap();
-        let StageState {
-            renderer,
-            current_frame,
-            ..
-        } = &mut *lock;
-        renderer.update(current_frame);
+        self.state
+            .write()
+            .unwrap()
+            .update_rgb_and_white_batch_fixtures(mapped);
     }
 }

@@ -1,3 +1,5 @@
+//! Internal light stage state(s)
+
 use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
@@ -6,7 +8,7 @@ use utoipa::ToSchema;
 use crate::{LightStageFrame, renderer::Renderer};
 
 /// Defines the active operation mode of the light stage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ToSchema)]
 pub enum StageMode {
     /// Runs a pleasing background animation
     #[default]
@@ -42,6 +44,86 @@ impl StageState {
             sequence: vec![],
             seq_index: 0,
         }
+    }
+
+    pub fn advance_tick(&mut self) -> (LightStageFrame, bool) {
+        match self.mode {
+            StageMode::Demo | StageMode::Manual => (self.current_frame.clone(), false),
+            StageMode::Playback { capture_fps } => todo!(),
+            StageMode::OLAT { capture_hz } => todo!(),
+        }
+    }
+
+    /// Update an rgb and a white fixture as a pair.
+    ///
+    /// Sets mode to manual.
+    pub fn update_rgb_and_white_single_fixture(
+        &mut self,
+        arc_idx: usize,
+        light_idx: usize,
+        rgb: (u16, u16, u16),
+        white: (u16, u16, u16),
+    ) {
+        self.mode = StageMode::Manual;
+        self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
+        self.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
+        self.commit_and_render();
+    }
+
+    /// Batch update a set of rgb and white fixture pairs.
+    ///
+    /// Sets mode to manual.
+    pub fn update_rgb_and_white_batch_fixtures(
+        &mut self,
+        fixtures: impl IntoIterator<Item = (usize, usize, (u16, u16, u16), (u16, u16, u16))>,
+    ) {
+        self.mode = StageMode::Manual;
+        for (arc_idx, light_idx, rgb, white) in fixtures {
+            self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
+            self.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
+        }
+    }
+
+    /// Update rgb and white for an arc.
+    ///
+    /// Sets mode to manual.
+    pub fn update_rgb_and_white_arc(
+        &mut self,
+        arc_idx: usize,
+        rgb: (u16, u16, u16),
+        white: (u16, u16, u16),
+    ) {
+        self.mode = StageMode::Manual;
+        for light in &mut self.renderer.rgb_fixtures[arc_idx] {
+            light.set_color(rgb.0, rgb.1, rgb.2);
+        }
+        for light in &mut self.renderer.white_fixtures[arc_idx] {
+            light.set_white(white.0, white.1, white.2);
+        }
+        self.commit_and_render();
+    }
+
+    /// Update rgb and white for entire stage.
+    ///
+    /// Sets mode to manual.
+    pub fn update_rgb_and_white_stage(&mut self, rgb: (u16, u16, u16), white: (u16, u16, u16)) {
+        self.mode = StageMode::Manual;
+        for arc in &mut self.renderer.rgb_fixtures {
+            for light in arc {
+                light.set_color(rgb.0, rgb.1, rgb.2);
+            }
+        }
+        for arc in &mut self.renderer.white_fixtures {
+            for light in arc {
+                light.set_white(white.0, white.1, white.2);
+            }
+        }
+        self.commit_and_render();
+    }
+
+    /// Commits all pending fixture changes and calls [`crate::renderer::Renderer::update`].
+    fn commit_and_render(&mut self) {
+        self.renderer.update(&mut self.current_frame);
     }
 }
 
