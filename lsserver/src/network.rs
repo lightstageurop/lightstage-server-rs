@@ -6,13 +6,14 @@ use std::{
     collections::HashMap,
     io::Cursor,
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
+    sync::{Arc, RwLock},
     thread,
     time::{Duration, Instant},
 };
 
 use anyhow::anyhow;
 use kinetrs::{DmxOutHeader, KinetPacketHeader, KinetPayload, PollPayload, PollReplyPayload};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     config::ServerConfig,
@@ -133,16 +134,21 @@ pub fn map_targets(
         .collect()
 }
 
-/// Manages KiNET communication
+/// Manages `KiNET` communication
 #[derive(Debug)]
 pub struct NetworkManager {
     state: SharedState,
     config: ServerConfig,
+    last_heartbeat: Arc<RwLock<Instant>>,
 }
 
 impl NetworkManager {
     pub fn new(state: SharedState, config: ServerConfig) -> Self {
-        Self { state, config }
+        Self {
+            state,
+            config,
+            last_heartbeat: Arc::new(RwLock::new(Instant::now())),
+        }
     }
 
     /// Discover PDS, spawn kinet threads
@@ -151,10 +157,16 @@ impl NetworkManager {
         let targets = map_targets(raw_targets);
         info!("Discovered {} power supplies", targets.len());
 
+        self.spawn_heartbeat_monitor();
+
         let mut socket = UdpSocket::bind("0.0.0.0:0")?;
         thread::spawn(move || self.run(&mut socket, &targets));
 
         Ok(())
+    }
+
+    pub fn is_healthy(&self) -> bool {
+        self.last_heartbeat.read().unwrap().elapsed() < Duration::from_secs(91)
     }
 
     /// DMX refresh loop
@@ -224,5 +236,51 @@ impl NetworkManager {
                 next_time = now;
             }
         }
+    }
+
+    fn spawn_heartbeat_monitor(&self) {
+        // TODO actually map each target and keep counter for each
+
+        // received thread
+        let last_hb_receiver = self.last_heartbeat.clone();
+        let rx_port = self.config.heartbeat_port;
+        thread::spawn(move || {
+            // Bind to the port where the power supplies broadcast or echo replies
+            let rx_socket = UdpSocket::bind(format!("0.0.0.0:{rx_port}"))
+                // must be 0.0.0.0 not unicast otherwise os will not give us heartbeats sent to 255.255.255.255
+                .expect("Failed to bind incoming KiNET heartbeat socket");
+            let mut buf = [0u8; 1024];
+
+            loop {
+                if let Ok((amt, _src)) = rx_socket.recv_from(&mut buf) {
+                    let mut cursor = Cursor::new(&buf[..amt]);
+                    // Check if it's a valid KiNET packet format
+                    if let Ok(KinetPacketHeader::HeartBeat(hb)) =
+                        KinetPacketHeader::read_from(&mut cursor)
+                    {
+                        debug!("heartbeat: {hb:?}");
+                        let mut lock = last_hb_receiver.write().unwrap();
+                        *lock = Instant::now();
+                    }
+                }
+            }
+        });
+
+        // watchdog thread
+        let last_hb_watchdog = self.last_heartbeat.clone();
+        thread::spawn(move || {
+            // 90s interval * 2 + 20s grace period
+            let timeout_limit = Duration::from_secs(200);
+            loop {
+                thread::sleep(Duration::from_secs(5));
+                let time_since_last = last_hb_watchdog.read().unwrap().elapsed();
+                if time_since_last > timeout_limit {
+                    error!(
+                        "Lost communication with KiNET power supplies! No heartbeats received for over 90 seconds."
+                    );
+                    // TODO update state here or just panic?
+                }
+            }
+        });
     }
 }

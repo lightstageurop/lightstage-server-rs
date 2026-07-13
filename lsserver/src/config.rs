@@ -1,3 +1,5 @@
+//! Light stage server configuration
+
 use std::net::{IpAddr, Ipv4Addr};
 
 use serde::Serialize;
@@ -11,6 +13,7 @@ pub struct ServerConfig {
     pub num_arcs: usize,
     pub lights_per_arc: usize,
     pub kinet_port: u16,
+    pub heartbeat_port: u16,
     /// `KiNET` / `DmxOut` refresh rate
     pub refresh_rate_ms: u64,
     /// Axum REST API bind address
@@ -26,6 +29,7 @@ impl Default for ServerConfig {
             num_arcs: 12,
             lights_per_arc: 14,
             kinet_port: 6038,
+            heartbeat_port: 6045,
             refresh_rate_ms: 1_000 / 30, // 40Hz jitters a bit, idk why
             api_ip: Ipv4Addr::UNSPECIFIED.into(),
             api_port: 8080,
