@@ -1,13 +1,23 @@
+//! # `KiNET` communication with PDSs
+//!
+//! Discovery, DMX refreshing and heartbeat listening.
+
 use std::{
     collections::HashMap,
     io::Cursor,
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
+    thread,
     time::{Duration, Instant},
 };
 
 use anyhow::anyhow;
-use kinetrs::{KinetPacketHeader, KinetPayload, PollPayload, PollReplyPayload};
-use tracing::{debug, warn};
+use kinetrs::{DmxOutHeader, KinetPacketHeader, KinetPayload, PollPayload, PollReplyPayload};
+use tracing::{debug, info, warn};
+
+use crate::{
+    config::ServerConfig,
+    state::{SharedState, StageMode},
+};
 
 /// One of our discovered PDS on the network.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,4 +131,98 @@ pub fn map_targets(
         .into_iter()
         .map(|pds| ((pds.arc_index, pds.is_rgb), pds.remote_adr))
         .collect()
+}
+
+/// Manages KiNET communication
+#[derive(Debug)]
+pub struct NetworkManager {
+    state: SharedState,
+    config: ServerConfig,
+}
+
+impl NetworkManager {
+    pub fn new(state: SharedState, config: ServerConfig) -> Self {
+        Self { state, config }
+    }
+
+    /// Discover PDS, spawn kinet threads
+    pub fn start(self) -> anyhow::Result<()> {
+        let raw_targets = discover_pds(self.config.kinet_port)?;
+        let targets = map_targets(raw_targets);
+        info!("Discovered {} power supplies", targets.len());
+
+        let mut socket = UdpSocket::bind("0.0.0.0:0")?;
+        thread::spawn(move || self.run(&mut socket, &targets));
+
+        Ok(())
+    }
+
+    /// DMX refresh loop
+    fn run(self, socket: &mut UdpSocket, targets: &HashMap<(usize, bool), SocketAddr>) {
+        // Neither ManagementTool nor kinet.py use this, always set to zero. we do, because we can.
+        let mut sequence = 0u32;
+        let mut packet = vec![0u8; DmxOutHeader::PACKET_SIZE + 512];
+        let mut next_time = Instant::now();
+
+        loop {
+            // get frame, refresh rate, trigger cameras?
+            let mut refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
+            let (frame, _trigger_cameras) = {
+                let mut lock = self.state.write().unwrap();
+
+                // set synced refresh rate
+                match lock.mode {
+                    StageMode::Playback { capture_fps: hz }
+                    | StageMode::OLAT { capture_hz: hz } => {
+                        let k = (30. / hz).max(1.);
+                        let target_network_hz = hz * k;
+                        refresh_time = Duration::from_micros(1_000_000 / target_network_hz as u64);
+                    }
+                    _ => {}
+                }
+
+                // get the next frame
+                lock.advance_tick()
+            };
+
+            // build header (same for each PDS)
+            KinetPacketHeader::from(DmxOutHeader {
+                sequence,
+                ..Default::default()
+            })
+            .write_to(&mut Cursor::new(&mut packet[0..DmxOutHeader::PACKET_SIZE]))
+            .expect("failed to serialise");
+
+            for arc in 0..self.config.num_arcs {
+                if let Some(rgb_addr) = targets.get(&(arc, true)) {
+                    packet[DmxOutHeader::PACKET_SIZE..].copy_from_slice(&frame.rgb_universes[arc]);
+                    let _ = socket.send_to(&packet, rgb_addr);
+                }
+
+                if let Some(white_addr) = targets.get(&(arc, false)) {
+                    packet[DmxOutHeader::PACKET_SIZE..]
+                        .copy_from_slice(&frame.white_universes[arc]);
+                    let _ = socket.send_to(&packet, white_addr);
+                }
+            }
+
+            sequence = sequence.wrapping_add(1);
+
+            // if trigger_cameras {}
+
+            next_time += refresh_time;
+            let now = Instant::now();
+            if next_time > now {
+                thread::sleep(next_time - now);
+            } else {
+                let lateness =
+                    now.duration_since(next_time.checked_sub(refresh_time).unwrap_or(now));
+                warn!(
+                    "oops. frame took {lateness:?} (Target was {:?})",
+                    refresh_time
+                );
+                next_time = now;
+            }
+        }
+    }
 }

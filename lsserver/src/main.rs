@@ -6,14 +6,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use kinetrs::{DmxOutHeader, KinetPacketHeader, KinetPayload};
-use tracing::{info, warn};
+use kinetrs::KinetPacketHeader;
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
     config::ServerConfig,
     demo::DemoAnimator,
-    network::{discover_pds, map_targets},
     renderer::Renderer,
     state::{SharedState, StageMode, StageState},
 };
@@ -62,11 +61,6 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting light stage server..");
 
-    let raw_targets = discover_pds(config.kinet_port)?;
-    let targets = map_targets(raw_targets);
-
-    info!("Discovered {} power supplies", targets.len());
-
     let mut renderer = Renderer::new(&config);
     for universe in 0..config.num_arcs {
         for fixture in 0..config.lights_per_arc {
@@ -77,81 +71,9 @@ async fn main() -> anyhow::Result<()> {
             renderer.white_fixtures[universe].push(fixtures::WhiteFixture::new(address).unwrap());
         }
     }
-
     let state: SharedState = Arc::new(RwLock::new(StageState::new(renderer)));
 
-    let state_net = state.clone();
-    let socket = UdpSocket::bind("0.0.0.0:0")?;
-
-    thread::spawn(move || {
-        // Neither ManagementTool nor kinet.py use this, always set to zero.
-        // we do just cuz
-        let mut sequence = 0u32;
-
-        let mut packet = vec![0u8; DmxOutHeader::PACKET_SIZE + 512];
-
-        let mut next_time = Instant::now();
-
-        loop {
-            {
-                let frame = {
-                    let lock = state_net.write().unwrap();
-                    match lock.mode {
-                        state::StageMode::Demo | state::StageMode::Manual => {
-                            lock.current_frame.clone()
-                        }
-                        state::StageMode::Playback => todo!(),
-                    }
-                };
-
-                let header: KinetPacketHeader = DmxOutHeader {
-                    sequence,
-                    ..Default::default()
-                }
-                .into();
-                header
-                    .write_to(&mut Cursor::new(&mut packet[0..DmxOutHeader::PACKET_SIZE]))
-                    .expect("failed to serialise");
-
-                for arc in 0..config.num_arcs {
-                    if let Some(rgb_addr) = targets.get(&(arc, true)) {
-                        let universe = frame.rgb_universes[arc];
-
-                        packet[DmxOutHeader::PACKET_SIZE..].copy_from_slice(&universe);
-                        socket
-                            .send_to(&packet, rgb_addr)
-                            .expect("failed to send rgb");
-                    }
-
-                    if let Some(white_addr) = targets.get(&(arc, false)) {
-                        let universe = frame.white_universes[arc];
-                        packet[DmxOutHeader::PACKET_SIZE..].copy_from_slice(&universe);
-                        socket
-                            .send_to(&packet, white_addr)
-                            .expect("failed to send white");
-                    }
-                }
-
-                sequence = sequence.wrapping_add(1);
-            }
-
-            let refresh_time = Duration::from_millis(config.refresh_rate_ms);
-            next_time += refresh_time;
-
-            let now = Instant::now();
-            if next_time > now {
-                thread::sleep(next_time - now);
-            } else {
-                let lateness = now.duration_since(next_time.checked_sub(refresh_time).unwrap());
-                warn!(
-                    "oops. frame took {lateness:?} (Target was {:?})",
-                    refresh_time
-                );
-
-                next_time = now;
-            }
-        }
-    });
+    network::NetworkManager::new(state.clone(), config).start()?;
 
     // {
     //     let state = state.clone();
