@@ -10,6 +10,7 @@ use kinetrs::{KinetPacketHeader, KinetPayload, PollPayload, PollReplyPayload};
 use tracing::{debug, warn};
 
 /// One of our discovered PDS on the network.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KinetPowerSupply {
     pub remote_adr: SocketAddr,
     pub arc_index: usize,

@@ -21,6 +21,7 @@ pub enum StageMode {
 }
 
 /// Shared lightstage state
+#[derive(Debug)]
 pub struct StageState {
     pub mode: StageMode,
     pub renderer: Renderer,

@@ -27,7 +27,7 @@ mod renderer;
 mod state;
 mod universe;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LightStageFrame {
     pub rgb_universes: [[u8; 512]; 12], // TODO dont hard code
     pub white_universes: [[u8; 512]; 12],

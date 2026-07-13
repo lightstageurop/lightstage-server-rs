@@ -5,6 +5,7 @@ use crate::{
 };
 
 /// Translates logical light fixture states into raw DMX universes. (`[u8; 512]`)
+#[derive(Debug)]
 pub struct Renderer {
     pub rgb_fixtures: Vec<Vec<RgbFixture<u16>>>,
     pub white_fixtures: Vec<Vec<WhiteFixture<u16>>>,

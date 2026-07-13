@@ -1,5 +1,5 @@
 /// Strongly typed DMX channel address (1-512).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DmxAddress(u16);
 
 impl DmxAddress {
@@ -57,6 +57,7 @@ pub trait Fixture {
 }
 
 /// Standard 3-channel RGB fixture, eg. iColor MR gen3
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RgbFixture<T: DmxValue> {
     address: DmxAddress,
     pub r: T,
@@ -106,6 +107,7 @@ impl<T: DmxValue> Fixture for RgbFixture<T> {
 }
 
 /// A 3-channel warm/neutral/cool white fixture, eg. iW MR gen3
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WhiteFixture<T: DmxValue> {
     address: DmxAddress,
     pub warm: T,
