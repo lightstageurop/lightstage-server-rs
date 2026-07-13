@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{LightStageFrame, renderer::Renderer};
+use crate::{LightStageFrame, animator::DemoAnimator, config::ServerConfig, renderer::Renderer};
 
 /// Defines the active operation mode of the light stage.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ToSchema)]
@@ -33,22 +33,30 @@ pub struct StageState {
     pub sequence: Vec<LightStageFrame>,
     /// Current frame index within sequence
     pub seq_index: usize,
+
+    demo_animator: DemoAnimator,
 }
 
 impl StageState {
-    pub fn new(renderer: Renderer) -> Self {
+    pub fn new(renderer: Renderer, config: ServerConfig) -> Self {
         Self {
             mode: StageMode::default(),
             renderer,
             current_frame: LightStageFrame::black(),
             sequence: vec![],
             seq_index: 0,
+            demo_animator: DemoAnimator::new(0.2, config),
         }
     }
 
     pub fn advance_tick(&mut self) -> (LightStageFrame, bool) {
         match self.mode {
-            StageMode::Demo | StageMode::Manual => (self.current_frame.clone(), false),
+            StageMode::Demo => {
+                self.demo_animator.tick(&mut self.renderer);
+                self.commit_and_render();
+                (self.current_frame.clone(), false)
+            }
+            StageMode::Manual => (self.current_frame.clone(), false),
             StageMode::Playback { capture_fps } => todo!(),
             StageMode::OLAT { capture_hz } => todo!(),
         }

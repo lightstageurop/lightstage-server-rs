@@ -1,25 +1,17 @@
-use std::{
-    io::Cursor,
-    net::UdpSocket,
-    sync::{Arc, RwLock},
-    thread,
-    time::{Duration, Instant},
-};
+use std::sync::{Arc, RwLock};
 
-use kinetrs::KinetPacketHeader;
-use tracing::{debug, error, info};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::{
     config::ServerConfig,
-    demo::DemoAnimator,
     renderer::Renderer,
-    state::{SharedState, StageMode, StageState},
+    state::{SharedState, StageState},
 };
 
+mod animator;
 mod api;
 mod config;
-mod demo;
 mod fixtures;
 mod network;
 mod renderer;
@@ -71,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
             renderer.white_fixtures[universe].push(fixtures::WhiteFixture::new(address).unwrap());
         }
     }
-    let state: SharedState = Arc::new(RwLock::new(StageState::new(renderer)));
+    let state: SharedState = Arc::new(RwLock::new(StageState::new(renderer, config)));
 
     network::NetworkManager::new(state.clone(), config).start()?;
 
@@ -92,24 +84,6 @@ async fn main() -> anyhow::Result<()> {
     //         }
     //     });
     // }
-
-    let state_render = state.clone();
-
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(500));
-
-        let animator = DemoAnimator::new(0.1);
-
-        loop {
-            {
-                let mut lock = state_render.write().unwrap();
-                if lock.mode == StageMode::Demo {
-                    animator.tick(&mut lock, &config);
-                }
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-    });
 
     api::start_server(config, state.clone()).await;
 
