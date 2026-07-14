@@ -16,6 +16,7 @@ use kinetrs::{DmxOutHeader, KinetPacketHeader, KinetPayload, PollPayload, PollRe
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    LightStageFrame,
     config::ServerConfig,
     state::{SharedState, StageMode},
 };
@@ -176,26 +177,53 @@ impl NetworkManager {
         let mut packet = vec![0u8; DmxOutHeader::PACKET_SIZE + 512];
         let mut next_time = Instant::now();
 
+        let mut pkt_counter = 0;
+        let mut pkts_per_frame = 1;
+        let mut current_frame_data = LightStageFrame::black();
+        let mut should_trigger = false;
+
         loop {
             // get frame, refresh rate, trigger cameras?
             let mut refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
-            let (frame, _trigger_cameras) = {
-                let mut lock = self.state.write().unwrap();
 
+            {
+                let lock = self.state.read().unwrap();
                 // set synced refresh rate
                 match lock.mode {
-                    StageMode::Playback { capture_fps: hz }
-                    | StageMode::OLAT { capture_hz: hz } => {
-                        let k = (30. / hz).max(1.);
-                        let target_network_hz = hz * k;
-                        refresh_time = Duration::from_micros(1_000_000 / target_network_hz as u64);
+                    StageMode::Demo | StageMode::Manual => {}
+                    StageMode::Playback {
+                        capture_fps: capture_hz,
                     }
-                    _ => {}
+                    | StageMode::OLAT { capture_hz } => {
+                        // find max network ticks per frame update
+                        let max_network_hz = 1000.0 / self.config.refresh_rate_ms as f64;
+                        pkts_per_frame = (max_network_hz / capture_hz).floor().max(1.0) as usize;
+                        // real network refresh rate synced with capture_hz
+                        let real_network_hz =
+                            (capture_hz * pkts_per_frame as f64).min(max_network_hz);
+                        refresh_time = Duration::from_secs_f64(1.0 / (real_network_hz));
+                    }
                 }
+            };
+
+            // only advance animation tick every k network packets
+            if pkt_counter == 0 {
+                // TODO fire cameras from the last frame before we send the new frame
+                // if trigger_cameras {}
 
                 // get the next frame
-                lock.advance_tick()
-            };
+                let (frame, _trigger) = {
+                    let mut lock = self.state.write().unwrap();
+                    lock.advance_tick()
+                };
+                current_frame_data = frame;
+                // should_trigger = _trigger;
+            }
+
+            pkt_counter += 1;
+            if pkt_counter >= pkts_per_frame {
+                pkt_counter = 0;
+            }
 
             // build header (same for each PDS)
             KinetPacketHeader::from(DmxOutHeader {
@@ -207,20 +235,19 @@ impl NetworkManager {
 
             for arc in 0..self.config.num_arcs {
                 if let Some(rgb_addr) = targets.get(&(arc, true)) {
-                    packet[DmxOutHeader::PACKET_SIZE..].copy_from_slice(&frame.rgb_universes[arc]);
+                    packet[DmxOutHeader::PACKET_SIZE..]
+                        .copy_from_slice(&current_frame_data.rgb_universes[arc]);
                     let _ = socket.send_to(&packet, rgb_addr);
                 }
 
                 if let Some(white_addr) = targets.get(&(arc, false)) {
                     packet[DmxOutHeader::PACKET_SIZE..]
-                        .copy_from_slice(&frame.white_universes[arc]);
+                        .copy_from_slice(&current_frame_data.white_universes[arc]);
                     let _ = socket.send_to(&packet, white_addr);
                 }
             }
 
             sequence = sequence.wrapping_add(1);
-
-            // if trigger_cameras {}
 
             next_time += refresh_time;
             let now = Instant::now();

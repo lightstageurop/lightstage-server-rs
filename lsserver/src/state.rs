@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::{
     LightStageFrame,
-    animator::{Animator, DemoAnimator, OlatAnimator},
+    animator::{Animator, DemoAnimator, OlatAnimator, PlaybackAnimator},
     config::ServerConfig,
     renderer::Renderer,
 };
@@ -36,13 +36,10 @@ pub struct StageState {
     pub renderer: Renderer,
     /// Current frame for [`StageMode::Manual`]
     pub current_frame: LightStageFrame,
-    /// Loaded animation sequence for [`StageMode::Playback`]
-    pub sequence: Vec<LightStageFrame>,
-    /// Current frame index within sequence
-    pub seq_index: usize,
 
     demo_animator: DemoAnimator,
     olat_animator: OlatAnimator,
+    playback_animator: PlaybackAnimator,
 }
 
 impl StageState {
@@ -51,27 +48,33 @@ impl StageState {
             mode: StageMode::default(),
             renderer,
             current_frame: LightStageFrame::black(),
-            sequence: vec![],
-            seq_index: 0,
             demo_animator: DemoAnimator::new(0.2, &config),
             olat_animator: OlatAnimator::new(&config),
+            playback_animator: PlaybackAnimator::default(),
         }
     }
 
     pub fn advance_tick(&mut self) -> (LightStageFrame, bool) {
-        match self.mode {
-            StageMode::Demo => {
-                self.demo_animator.tick(&mut self.renderer);
-                self.commit_and_render();
-                (self.current_frame.clone(), false)
-            }
-            StageMode::Manual => (self.current_frame.clone(), false),
-            StageMode::Playback { capture_fps } => todo!(),
-            StageMode::OLAT { capture_hz } => {
-                self.olat_animator.tick(&mut self.renderer);
-                self.commit_and_render();
-                (self.current_frame.clone(), true)
-            }
+        if self.mode == StageMode::Manual {
+            (self.current_frame.clone(), false)
+        } else {
+            let trigger = match self.mode {
+                StageMode::Manual => unreachable!(),
+                StageMode::Demo => {
+                    self.demo_animator.tick(&mut self.renderer);
+                    false
+                }
+                StageMode::Playback { .. } => {
+                    self.playback_animator.tick(&mut self.renderer);
+                    true
+                }
+                StageMode::OLAT { .. } => {
+                    self.olat_animator.tick(&mut self.renderer);
+                    true
+                }
+            };
+            self.commit_and_render();
+            (self.current_frame.clone(), trigger)
         }
     }
 

@@ -6,9 +6,11 @@
 
 mod demo;
 mod olat;
+mod playback;
 
 pub use demo::DemoAnimator;
 pub use olat::OlatAnimator;
+pub use playback::PlaybackAnimator;
 
 use crate::renderer::Renderer;
 
