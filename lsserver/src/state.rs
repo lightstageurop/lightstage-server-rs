@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::{
     LightStageFrame,
-    animator::{DemoAnimator, OlatAnimator},
+    animator::{Animator, DemoAnimator, OlatAnimator},
     config::ServerConfig,
     renderer::Renderer,
 };
@@ -42,6 +42,7 @@ pub struct StageState {
     pub seq_index: usize,
 
     demo_animator: DemoAnimator,
+    olat_animator: OlatAnimator,
 }
 
 impl StageState {
@@ -52,7 +53,8 @@ impl StageState {
             current_frame: LightStageFrame::black(),
             sequence: vec![],
             seq_index: 0,
-            demo_animator: DemoAnimator::new(0.2, config),
+            demo_animator: DemoAnimator::new(0.2, &config),
+            olat_animator: OlatAnimator::new(&config),
         }
     }
 
@@ -65,7 +67,11 @@ impl StageState {
             }
             StageMode::Manual => (self.current_frame.clone(), false),
             StageMode::Playback { capture_fps } => todo!(),
-            StageMode::OLAT { capture_hz } => todo!(),
+            StageMode::OLAT { capture_hz } => {
+                self.olat_animator.tick(&mut self.renderer);
+                self.commit_and_render();
+                (self.current_frame.clone(), true)
+            }
         }
     }
 

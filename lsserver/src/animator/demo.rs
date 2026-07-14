@@ -1,24 +1,28 @@
 use std::time::Instant;
 
-use crate::{config::ServerConfig, renderer::Renderer};
+use crate::{animator::Animator, config::ServerConfig, renderer::Renderer};
 
 #[derive(Debug)]
 pub struct DemoAnimator {
     start_time: Instant,
     brightness: f32,
-    config: ServerConfig,
+    num_arcs: usize,
+    lights_per_arc: usize,
 }
 
 impl DemoAnimator {
-    pub fn new(brightness: f32, config: ServerConfig) -> Self {
+    pub fn new(brightness: f32, config: &ServerConfig) -> Self {
         Self {
             start_time: Instant::now(),
             brightness,
-            config,
+            num_arcs: config.num_arcs,
+            lights_per_arc: config.lights_per_arc,
         }
     }
+}
 
-    pub fn tick(&self, renderer: &mut Renderer) {
+impl Animator for DemoAnimator {
+    fn tick(&mut self, renderer: &mut Renderer) {
         // this following is chatgpt's doing not mine
         // it's pretty.
         // i don't trust it.
@@ -29,8 +33,8 @@ impl DemoAnimator {
         let amplitude = 32767.5 * self.brightness;
         let center = 32767.5 * self.brightness;
 
-        for arc in 0..self.config.num_arcs {
-            for light in 0..self.config.lights_per_arc {
+        for arc in 0..self.num_arcs {
+            for light in 0..self.lights_per_arc {
                 let phase_offset = (arc as f32 * 0.5) + (light as f32 * 0.2);
                 let t = elapsed * 2.0 + phase_offset;
 

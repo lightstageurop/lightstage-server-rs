@@ -1,4 +1,4 @@
-use crate::{config::ServerConfig, renderer::Renderer};
+use crate::{animator::Animator, config::ServerConfig, renderer::Renderer};
 
 /// One-Light-At-a-Time animator.
 ///
@@ -20,8 +20,10 @@ impl OlatAnimator {
             lights_per_arc: config.lights_per_arc,
         }
     }
+}
 
-    pub fn tick(&mut self, renderer: &mut Renderer) {
+impl Animator for OlatAnimator {
+    fn tick(&mut self, renderer: &mut Renderer) {
         for arc in &mut renderer.rgb_fixtures {
             for light in arc {
                 light.set_color(0, 0, 0);
