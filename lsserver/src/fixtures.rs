@@ -1,3 +1,5 @@
+//! Modelling fixtures in a DMX universe
+
 /// Strongly typed DMX channel address (1-512).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DmxAddress(u16);

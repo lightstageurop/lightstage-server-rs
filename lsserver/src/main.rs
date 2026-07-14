@@ -67,24 +67,6 @@ async fn main() -> anyhow::Result<()> {
 
     network::NetworkManager::new(state.clone(), config).start()?;
 
-    // {
-    //     let state = state.clone();
-    //     thread::spawn(move || {
-    //         for arc in 0..config.num_arcs {
-    //             for light in 0..config.lights_per_arc {
-    //                 renderer.rgb_fixtures[arc][light].set_color(0, 65535, 0);
-    //                 renderer.white_fixtures[arc][light].set_white(0, 0, 65535);
-    //                 {
-    //                     let mut state_e = state.write().unwrap();
-    //                     renderer.update(&mut state_e);
-    //                 }
-
-    //                 thread::sleep(Duration::from_millis(100));
-    //             }
-    //         }
-    //     });
-    // }
-
     api::start_server(config, state.clone()).await;
 
     Ok(())
