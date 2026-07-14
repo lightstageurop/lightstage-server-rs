@@ -8,6 +8,10 @@
   rust-version.workspace = true
   version = "0.1.0"
 
+[features]
+  default = []
+  gpio = ["dep:rppal"]
+
 [dependencies]
   anyhow = "1.0.103"
   tokio = { version = "1.52.3", features = ["full"] }
@@ -24,3 +28,5 @@
   utoipa-axum = "0.2.0"
   utoipa-rapidoc = { version = "6.0.0", features = ["axum"] }
   utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+
+  rppal = { version = "0.22.1", optional = true }
