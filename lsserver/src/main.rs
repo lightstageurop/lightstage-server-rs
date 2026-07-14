@@ -16,7 +16,6 @@ mod fixtures;
 mod network;
 mod renderer;
 mod state;
-mod universe;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LightStageFrame {
