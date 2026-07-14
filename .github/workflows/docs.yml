@@ -30,6 +30,7 @@ jobs:
 
       - name: Build docs
         env:
+          # Adds an index page. only on nightly.
           RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
         run: |
           cargo doc --no-deps --workspace
