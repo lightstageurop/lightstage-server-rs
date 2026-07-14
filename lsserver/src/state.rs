@@ -97,6 +97,7 @@ impl StageState {
             self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
             self.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
         }
+        self.commit_and_render();
     }
 
     /// Update rgb and white for an arc.
