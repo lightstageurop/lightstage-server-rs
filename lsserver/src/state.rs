@@ -5,7 +5,12 @@ use std::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{LightStageFrame, animator::DemoAnimator, config::ServerConfig, renderer::Renderer};
+use crate::{
+    LightStageFrame,
+    animator::{DemoAnimator, OlatAnimator},
+    config::ServerConfig,
+    renderer::Renderer,
+};
 
 /// Defines the active operation mode of the light stage.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ToSchema)]
@@ -19,7 +24,9 @@ pub enum StageMode {
     /// Intended to be used for slow, or no capture. Shutter synchronisation is not guaranteed.
     Manual,
     /// Plays back a pre-loaded sequence of frames. Used for capture.
-    Playback,
+    Playback { capture_fps: f64 },
+    /// One Light At a Time
+    OLAT { capture_hz: f64 },
 }
 
 /// Shared lightstage state

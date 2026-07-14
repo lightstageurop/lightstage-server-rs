@@ -13,7 +13,7 @@ use utoipa::ToSchema;
 
 use crate::{
     config::ServerConfig,
-    state::{SharedState, StageMode, StageState},
+    state::{SharedState, StageMode},
 };
 
 /// Generic colour of a 3-channel fixture.
