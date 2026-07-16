@@ -78,6 +78,27 @@ impl StageState {
         }
     }
 
+    /// Transition to a new state
+    pub fn transition_to(&mut self, new_mode: StageMode) {
+        self.mode = new_mode;
+        match new_mode {
+            StageMode::Demo => {
+                let mut anim = DemoAnimator::new(0.2, &self.config);
+                self.animator = ActiveAnimator::Demo(anim);
+            }
+            StageMode::Manual => {
+                self.animator = ActiveAnimator::None;
+            }
+            StageMode::Playback { capture_fps } => {
+                todo!()
+            }
+            StageMode::OLAT { .. } => {
+                let mut anim = OlatAnimator::new(&self.config);
+                self.animator = ActiveAnimator::OLAT(anim);
+            }
+        }
+    }
+
     /// Update an rgb and a white fixture as a pair.
     ///
     /// Sets mode to manual.
@@ -88,7 +109,7 @@ impl StageState {
         rgb: (u16, u16, u16),
         white: (u16, u16, u16),
     ) {
-        self.mode = StageMode::Manual;
+        self.transition_to(StageMode::Manual);
         self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
         self.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
         self.commit_and_render();
@@ -101,7 +122,7 @@ impl StageState {
         &mut self,
         fixtures: impl IntoIterator<Item = (usize, usize, (u16, u16, u16), (u16, u16, u16))>,
     ) {
-        self.mode = StageMode::Manual;
+        self.transition_to(StageMode::Manual);
         for (arc_idx, light_idx, rgb, white) in fixtures {
             self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
             self.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
@@ -118,7 +139,7 @@ impl StageState {
         rgb: (u16, u16, u16),
         white: (u16, u16, u16),
     ) {
-        self.mode = StageMode::Manual;
+        self.transition_to(StageMode::Manual);
         for light in &mut self.renderer.rgb_fixtures[arc_idx] {
             light.set_color(rgb.0, rgb.1, rgb.2);
         }
@@ -132,7 +153,7 @@ impl StageState {
     ///
     /// Sets mode to manual.
     pub fn update_rgb_and_white_stage(&mut self, rgb: (u16, u16, u16), white: (u16, u16, u16)) {
-        self.mode = StageMode::Manual;
+        self.transition_to(StageMode::Manual);
         for arc in &mut self.renderer.rgb_fixtures {
             for light in arc {
                 light.set_color(rgb.0, rgb.1, rgb.2);

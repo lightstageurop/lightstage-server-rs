@@ -61,7 +61,7 @@ impl ApiState {
     pub fn set_mode(&self, mode: StageMode) {
         // TODO validate that capture hz for Olat and playback are valid here and return option?
         let mut lock = self.state.write().unwrap();
-        lock.mode = mode;
+        lock.transition_to(mode);
     }
 
     /// Updates colour of a single specified fixture.
