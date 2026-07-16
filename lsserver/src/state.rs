@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::{
     LightStageFrame,
-    animator::{Animator, DemoAnimator, OlatAnimator, PlaybackAnimator},
+    animator::{ActiveAnimator, Animator, DemoAnimator, OlatAnimator},
     config::ServerConfig,
     renderer::Renderer,
 };
@@ -29,17 +29,30 @@ pub enum StageMode {
     OLAT { capture_hz: f64 },
 }
 
+/// Metadata about a capturing session (eg. an OLAT sequence)
+#[derive(Debug, Clone)]
+pub struct CaptureSession {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TickResult {
+    Continue,
+    TriggerCapture,
+    Finished,
+}
+
 /// Shared lightstage state
 #[derive(Debug)]
 pub struct StageState {
     pub mode: StageMode,
-    pub renderer: Renderer,
+    renderer: Renderer,
     /// Current frame for [`StageMode::Manual`]
     pub current_frame: LightStageFrame,
+    /// Currently active capture session
+    pub active_session: Option<CaptureSession>,
 
-    demo_animator: DemoAnimator,
-    olat_animator: OlatAnimator,
-    playback_animator: PlaybackAnimator,
+    animator: ActiveAnimator,
+
+    config: ServerConfig,
 }
 
 impl StageState {
@@ -48,33 +61,33 @@ impl StageState {
             mode: StageMode::default(),
             renderer,
             current_frame: LightStageFrame::black(),
-            demo_animator: DemoAnimator::new(0.2, &config),
-            olat_animator: OlatAnimator::new(&config),
-            playback_animator: PlaybackAnimator::default(),
+            active_session: None,
+            animator: ActiveAnimator::Demo(DemoAnimator::new(0.2, &config)),
+            config,
         }
     }
 
-    pub fn advance_tick(&mut self) -> (LightStageFrame, bool) {
+    pub fn advance_tick(&mut self, dest: &mut LightStageFrame) -> TickResult {
         if self.mode == StageMode::Manual {
-            (self.current_frame.clone(), false)
+            dest.clone_from(&self.current_frame);
+            TickResult::Continue
         } else {
-            let trigger = match self.mode {
-                StageMode::Manual => unreachable!(),
-                StageMode::Demo => {
-                    self.demo_animator.tick(&mut self.renderer);
-                    false
-                }
-                StageMode::Playback { .. } => {
-                    self.playback_animator.tick(&mut self.renderer);
-                    true
-                }
-                StageMode::OLAT { .. } => {
-                    self.olat_animator.tick(&mut self.renderer);
-                    true
-                }
-            };
+            let still_active = self.animator.tick(&mut self.renderer);
             self.commit_and_render();
-            (self.current_frame.clone(), trigger)
+            if still_active {
+                let trigger = self.mode != StageMode::Demo;
+                dest.clone_from(&self.current_frame);
+                if trigger {
+                    TickResult::TriggerCapture
+                } else {
+                    TickResult::Continue
+                }
+            } else {
+                // sequence ended. transition to idle
+                self.transition_to(StageMode::Demo);
+                dest.clone_from(&self.current_frame);
+                TickResult::Finished
+            }
         }
     }
 
