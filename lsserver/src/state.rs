@@ -120,12 +120,16 @@ impl StageState {
         &mut self,
         arc_idx: usize,
         light_idx: usize,
-        rgb: (u16, u16, u16),
-        white: (u16, u16, u16),
+        rgb: Option<(u16, u16, u16)>,
+        white: Option<(u16, u16, u16)>,
     ) {
         self.transition_to(StageMode::Manual);
-        self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
-        self.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
+        if let Some(rgb) = rgb {
+            self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
+        }
+        if let Some(white) = white {
+            self.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
+        }
         self.commit_and_render();
     }
 
@@ -134,12 +138,24 @@ impl StageState {
     /// Sets mode to manual.
     pub fn update_rgb_and_white_batch_fixtures(
         &mut self,
-        fixtures: impl IntoIterator<Item = (usize, usize, (u16, u16, u16), (u16, u16, u16))>,
+        fixtures: impl IntoIterator<
+            Item = (
+                usize,
+                usize,
+                Option<(u16, u16, u16)>,
+                Option<(u16, u16, u16)>,
+            ),
+        >,
     ) {
         self.transition_to(StageMode::Manual);
         for (arc_idx, light_idx, rgb, white) in fixtures {
-            self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
-            self.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
+            if let Some(rgb) = rgb {
+                self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
+            }
+            if let Some(white) = white {
+                self.renderer.white_fixtures[arc_idx][light_idx]
+                    .set_white(white.0, white.1, white.2);
+            }
         }
         self.commit_and_render();
     }
@@ -150,15 +166,19 @@ impl StageState {
     pub fn update_rgb_and_white_arc(
         &mut self,
         arc_idx: usize,
-        rgb: (u16, u16, u16),
-        white: (u16, u16, u16),
+        rgb: Option<(u16, u16, u16)>,
+        white: Option<(u16, u16, u16)>,
     ) {
         self.transition_to(StageMode::Manual);
-        for light in &mut self.renderer.rgb_fixtures[arc_idx] {
-            light.set_color(rgb.0, rgb.1, rgb.2);
+        if let Some(rgb) = rgb {
+            for light in &mut self.renderer.rgb_fixtures[arc_idx] {
+                light.set_color(rgb.0, rgb.1, rgb.2);
+            }
         }
-        for light in &mut self.renderer.white_fixtures[arc_idx] {
-            light.set_white(white.0, white.1, white.2);
+        if let Some(white) = white {
+            for light in &mut self.renderer.white_fixtures[arc_idx] {
+                light.set_white(white.0, white.1, white.2);
+            }
         }
         self.commit_and_render();
     }
@@ -166,16 +186,24 @@ impl StageState {
     /// Update rgb and white for entire stage.
     ///
     /// Sets mode to manual.
-    pub fn update_rgb_and_white_stage(&mut self, rgb: (u16, u16, u16), white: (u16, u16, u16)) {
+    pub fn update_rgb_and_white_stage(
+        &mut self,
+        rgb: Option<(u16, u16, u16)>,
+        white: Option<(u16, u16, u16)>,
+    ) {
         self.transition_to(StageMode::Manual);
-        for arc in &mut self.renderer.rgb_fixtures {
-            for light in arc {
-                light.set_color(rgb.0, rgb.1, rgb.2);
+        if let Some(rgb) = rgb {
+            for arc in &mut self.renderer.rgb_fixtures {
+                for light in arc {
+                    light.set_color(rgb.0, rgb.1, rgb.2);
+                }
             }
         }
-        for arc in &mut self.renderer.white_fixtures {
-            for light in arc {
-                light.set_white(white.0, white.1, white.2);
+        if let Some(white) = white {
+            for arc in &mut self.renderer.white_fixtures {
+                for light in arc {
+                    light.set_white(white.0, white.1, white.2);
+                }
             }
         }
         self.commit_and_render();

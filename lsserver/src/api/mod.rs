@@ -30,8 +30,8 @@ impl From<FixtureColour> for (u16, u16, u16) {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 struct UpdateColourRequest {
-    rgb: FixtureColour,
-    white: FixtureColour,
+    rgb: Option<FixtureColour>,
+    white: Option<FixtureColour>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
@@ -71,42 +71,56 @@ impl ApiState {
         &self,
         arc_idx: usize,
         light_idx: usize,
-        rgb: FixtureColour,
-        white: FixtureColour,
+        rgb: Option<FixtureColour>,
+        white: Option<FixtureColour>,
     ) {
         self.state
             .write()
             .unwrap()
-            .update_rgb_and_white_single_fixture(arc_idx, light_idx, rgb.into(), white.into());
+            .update_rgb_and_white_single_fixture(
+                arc_idx,
+                light_idx,
+                rgb.map(Into::into),
+                white.map(Into::into),
+            );
     }
 
     /// Updates colour of an entire arc uniformly.
     ///
     /// Also sets the mode to manual.
-    pub fn set_arc(&self, arc_idx: usize, rgb: FixtureColour, white: FixtureColour) {
-        self.state
-            .write()
-            .unwrap()
-            .update_rgb_and_white_arc(arc_idx, rgb.into(), white.into());
+    pub fn set_arc(
+        &self,
+        arc_idx: usize,
+        rgb: Option<FixtureColour>,
+        white: Option<FixtureColour>,
+    ) {
+        self.state.write().unwrap().update_rgb_and_white_arc(
+            arc_idx,
+            rgb.map(Into::into),
+            white.map(Into::into),
+        );
     }
 
     /// Updates entire light stage to one uniform colour.
     ///
     /// Also sets the mode to manual.
-    pub fn set_lightstage(&self, rgb: FixtureColour, white: FixtureColour) {
+    pub fn set_lightstage(&self, rgb: Option<FixtureColour>, white: Option<FixtureColour>) {
         self.state
             .write()
             .unwrap()
-            .update_rgb_and_white_stage(rgb.into(), white.into());
+            .update_rgb_and_white_stage(rgb.map(Into::into), white.map(Into::into));
     }
 
     /// Batch updates some fixtures.
     ///
     /// Also sets the mode to manual.
-    pub fn set_fixtures(&self, fixtures: Vec<(usize, usize, FixtureColour, FixtureColour)>) {
+    pub fn set_fixtures(
+        &self,
+        fixtures: Vec<(usize, usize, Option<FixtureColour>, Option<FixtureColour>)>,
+    ) {
         let mapped = fixtures
             .into_iter()
-            .map(|(a, l, r, w)| (a, l, r.into(), w.into()));
+            .map(|(a, l, r, w)| (a, l, r.map(Into::into), w.map(Into::into)));
 
         self.state
             .write()
