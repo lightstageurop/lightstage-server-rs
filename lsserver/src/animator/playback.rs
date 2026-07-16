@@ -9,7 +9,11 @@ pub struct PlaybackAnimator {
 }
 
 impl Animator for PlaybackAnimator {
-    fn tick(&mut self, renderer: &mut crate::renderer::Renderer) {
+    fn tick(&mut self, renderer: &mut crate::renderer::Renderer) -> bool {
+        todo!()
+    }
+
+    fn start(&mut self) {
         todo!()
     }
 }

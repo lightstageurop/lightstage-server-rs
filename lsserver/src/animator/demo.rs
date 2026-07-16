@@ -22,7 +22,7 @@ impl DemoAnimator {
 }
 
 impl Animator for DemoAnimator {
-    fn tick(&mut self, renderer: &mut Renderer) {
+    fn tick(&mut self, renderer: &mut Renderer) -> bool {
         // this following is chatgpt's doing not mine
         // it's pretty.
         // i don't trust it.
@@ -51,5 +51,11 @@ impl Animator for DemoAnimator {
                 renderer.white_fixtures[arc][light].set_white(w, w, w);
             }
         }
+
+        true // demo never dies
+    }
+
+    fn start(&mut self) {
+        todo!()
     }
 }
