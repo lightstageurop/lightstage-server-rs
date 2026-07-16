@@ -12,8 +12,4 @@ impl Animator for PlaybackAnimator {
     fn tick(&mut self, renderer: &mut crate::renderer::Renderer) -> bool {
         todo!()
     }
-
-    fn start(&mut self) {
-        todo!()
-    }
 }

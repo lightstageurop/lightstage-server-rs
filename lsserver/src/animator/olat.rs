@@ -63,10 +63,4 @@ impl Animator for OlatAnimator {
 
         true
     }
-
-    fn start(&mut self) {
-        self.current_arc = 0;
-        self.current_light = 0;
-        self.done = false;
-    }
 }

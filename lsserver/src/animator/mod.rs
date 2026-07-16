@@ -19,10 +19,9 @@ pub trait Animator {
     ///
     /// Returns `true` if the sequence is still active, or `false` if completed.
     fn tick(&mut self, renderer: &mut Renderer) -> bool;
-
-    fn start(&mut self);
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug)]
 pub enum ActiveAnimator {
     Demo(demo::DemoAnimator),
@@ -38,15 +37,6 @@ impl Animator for ActiveAnimator {
             Self::OLAT(olat_animator) => olat_animator.tick(renderer),
             Self::Playback(playback_animator) => playback_animator.tick(renderer),
             Self::None => false,
-        }
-    }
-
-    fn start(&mut self) {
-        match self {
-            Self::Demo(demo_animator) => demo_animator.start(),
-            Self::OLAT(olat_animator) => olat_animator.start(),
-            Self::Playback(playback_animator) => playback_animator.start(),
-            Self::None => {}
         }
     }
 }

@@ -13,6 +13,7 @@ use crate::{
 };
 
 /// Defines the active operation mode of the light stage.
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ToSchema)]
 pub enum StageMode {
     /// Runs a pleasing background animation
@@ -96,17 +97,17 @@ impl StageState {
         self.mode = new_mode;
         match new_mode {
             StageMode::Demo => {
-                let mut anim = DemoAnimator::new(0.2, &self.config);
+                let anim = DemoAnimator::new(0.2, &self.config);
                 self.animator = ActiveAnimator::Demo(anim);
             }
             StageMode::Manual => {
                 self.animator = ActiveAnimator::None;
             }
-            StageMode::Playback { capture_fps } => {
+            StageMode::Playback { .. } => {
                 todo!()
             }
             StageMode::OLAT { .. } => {
-                let mut anim = OlatAnimator::new(&self.config);
+                let anim = OlatAnimator::new(&self.config);
                 self.animator = ActiveAnimator::OLAT(anim);
             }
         }

@@ -54,8 +54,4 @@ impl Animator for DemoAnimator {
 
         true // demo never dies
     }
-
-    fn start(&mut self) {
-        todo!()
-    }
 }
