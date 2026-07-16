@@ -18,7 +18,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     LightStageFrame,
     config::ServerConfig,
-    state::{SharedState, StageMode},
+    state::{SharedState, StageMode, TickResult},
 };
 
 /// One of our discovered PDS on the network.
@@ -176,6 +176,7 @@ impl NetworkManager {
         let mut sequence = 0u32;
         let mut packet = vec![0u8; DmxOutHeader::PACKET_SIZE + 512];
         let mut next_time = Instant::now();
+        let mut refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
 
         let mut pkt_counter = 0;
         let mut pkts_per_frame = 1;
@@ -183,14 +184,30 @@ impl NetworkManager {
         let mut should_trigger = false;
 
         loop {
-            // get frame, refresh rate, trigger cameras?
-            let mut refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
+            // only advance animation tick every k network packets
+            if pkt_counter == 0 {
+                // update current_frame_data and get mode, result.
+                let (tick_result, mode) = {
+                    // we don't need a write lock for manual mode
+                    let lock = self.state.read().unwrap();
+                    if lock.mode == StageMode::Manual {
+                        current_frame_data.clone_from(&lock.current_frame);
+                        (TickResult::Continue, lock.mode)
+                    } else {
+                        // drop read lock, acquire write lock.
+                        drop(lock);
+                        let mut lock = self.state.write().unwrap();
+                        let result = lock.advance_tick(&mut current_frame_data);
+                        (result, lock.mode)
+                    }
+                };
 
-            {
-                let lock = self.state.read().unwrap();
                 // set synced refresh rate
-                match lock.mode {
-                    StageMode::Demo | StageMode::Manual => {}
+                match mode {
+                    StageMode::Demo | StageMode::Manual => {
+                        pkts_per_frame = 1;
+                        refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
+                    }
                     StageMode::Playback {
                         capture_fps: capture_hz,
                     }
@@ -204,20 +221,11 @@ impl NetworkManager {
                         refresh_time = Duration::from_secs_f64(1.0 / (real_network_hz));
                     }
                 }
-            };
 
-            // only advance animation tick every k network packets
-            if pkt_counter == 0 {
                 // TODO fire cameras from the last frame before we send the new frame
-                // if trigger_cameras {}
+                if should_trigger {}
 
-                // get the next frame
-                let (frame, _trigger) = {
-                    let mut lock = self.state.write().unwrap();
-                    lock.advance_tick()
-                };
-                current_frame_data = frame;
-                // should_trigger = _trigger;
+                should_trigger = tick_result == TickResult::TriggerCapture;
             }
 
             pkt_counter += 1;
