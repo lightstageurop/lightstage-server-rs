@@ -187,18 +187,19 @@ impl NetworkManager {
             // only advance animation tick every k network packets
             if pkt_counter == 0 {
                 // update current_frame_data and get mode, result.
-                let (tick_result, mode) = {
+                let (tick_result, mode, capture_hz) = {
                     // we don't need a write lock for manual mode
                     let lock = self.state.read().unwrap();
                     if lock.mode == StageMode::Manual {
                         current_frame_data.clone_from(&lock.current_frame);
-                        (TickResult::Continue, lock.mode)
+                        (TickResult::Continue, lock.mode, None)
                     } else {
                         // drop read lock, acquire write lock.
                         drop(lock);
                         let mut lock = self.state.write().unwrap();
                         let result = lock.advance_tick(&mut current_frame_data);
-                        (result, lock.mode)
+                        let hz = lock.active_session.as_ref().map(|s| s.config.capture_hz);
+                        (result, lock.mode, hz)
                     }
                 };
 
@@ -208,13 +209,13 @@ impl NetworkManager {
                         pkts_per_frame = 1;
                         refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
                     }
-                    StageMode::Playback { capture_hz } | StageMode::OLAT { capture_hz } => {
+                    StageMode::Playback | StageMode::OLAT => {
                         // find max network ticks per frame update
                         let max_network_hz = 1000.0 / self.config.refresh_rate_ms as f64;
-                        pkts_per_frame = (max_network_hz / capture_hz).floor().max(1.0) as usize;
+                        let hz = capture_hz.unwrap_or(max_network_hz);
+                        pkts_per_frame = (max_network_hz / hz).floor().max(1.0) as usize;
                         // real network refresh rate synced with capture_hz
-                        let real_network_hz =
-                            (capture_hz * pkts_per_frame as f64).min(max_network_hz);
+                        let real_network_hz = (hz * pkts_per_frame as f64).min(max_network_hz);
                         refresh_time = Duration::from_secs_f64(1.0 / (real_network_hz));
                     }
                 }

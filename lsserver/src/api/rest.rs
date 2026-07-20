@@ -22,6 +22,7 @@ use std::net::SocketAddr;
 use axum::{
     Json,
     extract::{Path, State},
+    http::StatusCode,
     routing::any,
 };
 use tokio::net::TcpListener;
@@ -32,7 +33,7 @@ use utoipa_rapidoc::RapiDoc;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
-    api::{ApiState, UpdateColourRequest, UpdateFixturesRequest, ws::ws_handler},
+    api::{ApiState, ModeRequest, UpdateColourRequest, UpdateFixturesRequest, ws::ws_handler},
     config::ServerConfig,
     state::{SharedState, StageMode},
 };
@@ -118,11 +119,16 @@ async fn get_mode(State(api): State<ApiState>) -> Json<StageMode> {
     path = "/api/mode",
     tag = CONFIG_TAG,
     responses(
-        (status = 200, description = "Set mode success")
+        (status = 200, description = "Set mode success"),
+        (status = 400, description = "Invalid mode parameters", body = String)
     )
 )]
-async fn set_mode(State(api): State<ApiState>, Json(payload): Json<StageMode>) {
-    api.set_mode(payload);
+async fn set_mode(
+    State(api): State<ApiState>,
+    Json(payload): Json<ModeRequest>,
+) -> Result<(), (StatusCode, String)> {
+    api.set_mode(payload)
+        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))
 }
 
 /// Set the entire light stage to a uniform colour.
