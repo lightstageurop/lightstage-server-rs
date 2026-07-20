@@ -29,8 +29,16 @@ use crate::{
     state::StageMode,
 };
 
+/// Inbound websocket request
+#[derive(Debug, Clone, Deserialize)]
+pub struct WsRequest {
+    /// Optional command id, will be echoed by the server
+    pub id: Option<u64>,
+    pub command: WsCommand,
+}
+
 /// Inbound websocket commands
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum WsCommand {
     /// Get the server's configuration.
     GetConfig,
@@ -56,15 +64,33 @@ pub enum WsCommand {
     ManualTrigger,
 }
 
-/// Outgoing websocket response
+/// Outbound websocket message
+#[derive(Debug, Clone, Serialize)]
+pub enum WsServerMessage {
+    Response {
+        id: Option<u64>,
+        response: WsResponse,
+    },
+    Event(WsEvent),
+}
+
+/// An outgoing response to a [`WsCommand`].
 #[derive(Debug, Clone, Serialize)]
 pub enum WsResponse {
+    /// Success
+    Ok,
     /// The light stage's current operation mode
     Mode(StageMode),
     /// The server's config
     Config(ServerConfig),
     /// An error.
     Error { code: WsErrorKind, message: String },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum WsEvent {
+    ModeChanged(StageMode),
+    // CaptureFinished
 }
 
 /// Error codes that can be returned
@@ -82,13 +108,16 @@ async fn handle_socket(mut socket: WebSocket, api: ApiState) {
 
     while let Some(Ok(msg)) = socket.recv().await {
         match msg {
-            Message::Binary(bytes) => match ciborium::from_reader::<WsCommand, _>(&bytes[..]) {
-                Ok(cmd) => {
-                    if let Some(response) = execute_command(cmd, &api) {
-                        if send_response(&mut socket, &response).await.is_err() {
-                            error!("Failed to transmit websocket response! Dropping connection.");
-                            break;
-                        }
+            Message::Binary(bytes) => match ciborium::from_reader::<WsRequest, _>(&bytes[..]) {
+                Ok(req) => {
+                    let response = execute_command(req.command, &api);
+                    let outbound = WsServerMessage::Response {
+                        id: req.id,
+                        response,
+                    };
+                    if send_message(&mut socket, &outbound).await.is_err() {
+                        error!("Failed to transmit websocket response! Dropping connection.");
+                        break;
                     }
                 }
                 Err(e) => {
@@ -96,7 +125,11 @@ async fn handle_socket(mut socket: WebSocket, api: ApiState) {
                         code: WsErrorKind::InvalidPayload,
                         message: format!("Invalid CBOR payload: {e}"),
                     };
-                    if send_response(&mut socket, &err_response).await.is_err() {
+                    let outbound = WsServerMessage::Response {
+                        id: None,
+                        response: err_response,
+                    };
+                    if send_message(&mut socket, &outbound).await.is_err() {
                         error!("Failed to transmit websocket error response! Dropping connection.");
                         break;
                     }
@@ -112,24 +145,24 @@ async fn handle_socket(mut socket: WebSocket, api: ApiState) {
 }
 
 /// Serialise outbound respones into CBOR message and send.
-async fn send_response(socket: &mut WebSocket, response: &WsResponse) -> anyhow::Result<()> {
+async fn send_message(socket: &mut WebSocket, message: &WsServerMessage) -> anyhow::Result<()> {
     let mut buf: Vec<u8> = Vec::new();
-    ciborium::into_writer(&response, &mut buf)?;
+    ciborium::into_writer(&message, &mut buf)?;
     socket.send(Message::Binary(buf.into())).await?;
     Ok(())
 }
 
 /// Interpret commands and update underlying state ([`ApiState`]).
-fn execute_command(command: WsCommand, api: &ApiState) -> Option<WsResponse> {
+fn execute_command(command: WsCommand, api: &ApiState) -> WsResponse {
     match command {
-        WsCommand::GetConfig => Some(WsResponse::Config(api.config)),
-        WsCommand::GetMode => Some(WsResponse::Mode(api.get_mode())),
+        WsCommand::GetConfig => WsResponse::Config(api.config),
+        WsCommand::GetMode => WsResponse::Mode(api.get_mode()),
         WsCommand::SetMode(mode) => match api.set_mode(mode) {
-            Ok(()) => None,
-            Err(err) => Some(WsResponse::Error {
+            Ok(()) => WsResponse::Ok,
+            Err(err) => WsResponse::Error {
                 code: WsErrorKind::InvalidPayload,
                 message: err.to_string(),
-            }),
+            },
         },
         WsCommand::SetFixture {
             arc_idx,
@@ -137,7 +170,7 @@ fn execute_command(command: WsCommand, api: &ApiState) -> Option<WsResponse> {
             colour,
         } => {
             api.set_fixture(arc_idx, light_idx, colour.rgb, colour.white);
-            None
+            WsResponse::Ok
         }
         WsCommand::SetFixtures(fixtures) => {
             let mapped = fixtures
@@ -145,22 +178,22 @@ fn execute_command(command: WsCommand, api: &ApiState) -> Option<WsResponse> {
                 .map(|req| (req.arc_idx, req.light_idx, req.colour.rgb, req.colour.white))
                 .collect();
             api.set_fixtures(mapped);
-            None
+            WsResponse::Ok
         }
         WsCommand::SetArc { arc_idx, colour } => {
             api.set_arc(arc_idx, colour.rgb, colour.white);
-            None
+            WsResponse::Ok
         }
         WsCommand::SetLightstage(colour) => {
             api.set_lightstage(colour.rgb, colour.white);
-            None
+            WsResponse::Ok
         }
         WsCommand::ManualTrigger => match api.trigger_manual() {
-            Ok(()) => None,
-            Err(err) => Some(WsResponse::Error {
+            Ok(()) => WsResponse::Ok,
+            Err(err) => WsResponse::Error {
                 code: WsErrorKind::InvalidPayload,
                 message: err.to_string(),
-            }),
+            },
         },
     }
 }
