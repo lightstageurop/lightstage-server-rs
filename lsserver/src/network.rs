@@ -208,10 +208,7 @@ impl NetworkManager {
                         pkts_per_frame = 1;
                         refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
                     }
-                    StageMode::Playback {
-                        capture_fps: capture_hz,
-                    }
-                    | StageMode::OLAT { capture_hz } => {
+                    StageMode::Playback { capture_hz } | StageMode::OLAT { capture_hz } => {
                         // find max network ticks per frame update
                         let max_network_hz = 1000.0 / self.config.refresh_rate_ms as f64;
                         pkts_per_frame = (max_network_hz / capture_hz).floor().max(1.0) as usize;
