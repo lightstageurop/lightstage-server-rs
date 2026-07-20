@@ -170,14 +170,20 @@ impl StageState {
                 config.validate(&self.config)?;
                 let anim = PlaybackAnimator::new();
                 self.mode = StageMode::Playback;
-                self.active_session = Some(CaptureSession::new(anim.total_frames(), config));
+                self.active_session = Some(CaptureSession::new(
+                    anim.total_frames().unwrap_or(0),
+                    config,
+                ));
                 self.animator = ActiveAnimator::Playback(anim);
             }
             ModeRequest::OLAT { config } => {
                 config.validate(&self.config)?;
                 let anim = OlatAnimator::new(&self.config);
                 self.mode = StageMode::OLAT;
-                self.active_session = Some(CaptureSession::new(anim.total_frames(), config));
+                self.active_session = Some(CaptureSession::new(
+                    anim.total_frames().unwrap_or(0),
+                    config,
+                ));
                 self.animator = ActiveAnimator::OLAT(anim);
             }
         }

@@ -19,6 +19,9 @@ pub trait Animator {
     ///
     /// Returns `true` if the sequence is still active, or `false` if completed.
     fn tick(&mut self, renderer: &mut Renderer) -> bool;
+
+    /// Returns the total frame count for a fixed-length sequence or none for an infinite loop.
+    fn total_frames(&self) -> Option<usize>;
 }
 
 #[allow(clippy::upper_case_acronyms)]
@@ -33,10 +36,19 @@ pub enum ActiveAnimator {
 impl Animator for ActiveAnimator {
     fn tick(&mut self, renderer: &mut Renderer) -> bool {
         match self {
-            Self::Demo(demo_animator) => demo_animator.tick(renderer),
-            Self::OLAT(olat_animator) => olat_animator.tick(renderer),
-            Self::Playback(playback_animator) => playback_animator.tick(renderer),
+            Self::Demo(a) => a.tick(renderer),
+            Self::OLAT(a) => a.tick(renderer),
+            Self::Playback(a) => a.tick(renderer),
             Self::None => false,
+        }
+    }
+
+    fn total_frames(&self) -> Option<usize> {
+        match self {
+            ActiveAnimator::Demo(a) => a.total_frames(),
+            ActiveAnimator::OLAT(a) => a.total_frames(),
+            ActiveAnimator::Playback(a) => a.total_frames(),
+            ActiveAnimator::None => None,
         }
     }
 }
