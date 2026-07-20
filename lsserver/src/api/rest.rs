@@ -56,6 +56,7 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
         .routes(routes!(set_arc))
         .routes(routes!(set_fixture))
         .routes(routes!(set_fixtures))
+        .routes(routes!(manual_trigger))
         .split_for_parts();
 
     // host swagger / rapidocs
@@ -217,4 +218,21 @@ async fn set_fixtures(
             .map(|req| (req.arc_idx, req.light_idx, req.colour.rgb, req.colour.white))
             .collect(),
     );
+}
+
+/// Trigger a capture.
+///
+/// Counterpart to [`crate::api::ws::WsCommand::ManualTrigger`]
+#[utoipa::path(
+    post,
+    path = "/api/manual/trigger",
+    tag = MANUAL_TAG,
+    responses(
+        (status = 200, description = "Trigger success"),
+        (status = 400, description = "Failed to trigger cameras", body = String)
+    )
+)]
+async fn manual_trigger(State(api): State<ApiState>) -> Result<(), (StatusCode, String)> {
+    api.trigger_manual()
+        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))
 }

@@ -53,6 +53,7 @@ pub enum WsCommand {
     },
     /// Update multiple fixtures' colours.
     SetFixtures(Vec<UpdateFixturesRequest>),
+    ManualTrigger,
 }
 
 /// Outgoing websocket response
@@ -154,5 +155,12 @@ fn execute_command(command: WsCommand, api: &ApiState) -> Option<WsResponse> {
             api.set_lightstage(colour.rgb, colour.white);
             None
         }
+        WsCommand::ManualTrigger => match api.trigger_manual() {
+            Ok(()) => None,
+            Err(err) => Some(WsResponse::Error {
+                code: WsErrorKind::InvalidPayload,
+                message: err.to_string(),
+            }),
+        },
     }
 }

@@ -1,6 +1,7 @@
 //! Internal light stage state(s)
 
 use std::{
+    mem,
     sync::{Arc, RwLock},
     time::Instant,
 };
@@ -90,6 +91,8 @@ pub struct StageState {
     renderer: Renderer,
     /// Current frame for [`StageMode::Manual`]
     pub current_frame: LightStageFrame,
+    /// Trigger queued for [`StageMode::Manual`]?
+    pub manual_capture_requested: bool,
     /// Currently active capture session
     pub active_session: Option<CaptureSession>,
 
@@ -104,6 +107,7 @@ impl StageState {
             mode: StageMode::default(),
             renderer,
             current_frame: LightStageFrame::black(),
+            manual_capture_requested: false,
             active_session: None,
             animator: ActiveAnimator::Demo(DemoAnimator::new(0.2, &config)),
             config,
@@ -113,7 +117,11 @@ impl StageState {
     pub fn advance_tick(&mut self, dest: &mut LightStageFrame) -> TickResult {
         if self.mode == StageMode::Manual {
             dest.clone_from(&self.current_frame);
-            TickResult::Continue
+            if mem::take(&mut self.manual_capture_requested) {
+                TickResult::TriggerCapture
+            } else {
+                TickResult::Continue
+            }
         } else {
             let still_active = self.animator.tick(&mut self.renderer);
             self.commit_and_render();

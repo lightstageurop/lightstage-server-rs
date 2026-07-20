@@ -188,19 +188,10 @@ impl NetworkManager {
             if pkt_counter == 0 {
                 // update current_frame_data and get mode, result.
                 let (tick_result, mode, capture_hz) = {
-                    // we don't need a write lock for manual mode
-                    let lock = self.state.read().unwrap();
-                    if lock.mode == StageMode::Manual {
-                        current_frame_data.clone_from(&lock.current_frame);
-                        (TickResult::Continue, lock.mode, None)
-                    } else {
-                        // drop read lock, acquire write lock.
-                        drop(lock);
-                        let mut lock = self.state.write().unwrap();
-                        let result = lock.advance_tick(&mut current_frame_data);
-                        let hz = lock.active_session.as_ref().map(|s| s.config.capture_hz);
-                        (result, lock.mode, hz)
-                    }
+                    let mut lock = self.state.write().unwrap();
+                    let result = lock.advance_tick(&mut current_frame_data);
+                    let hz = lock.active_session.as_ref().map(|s| s.config.capture_hz);
+                    (result, lock.mode, hz)
                 };
 
                 // set synced refresh rate
@@ -221,7 +212,11 @@ impl NetworkManager {
                 }
 
                 // TODO fire cameras from the last frame before we send the new frame
-                if should_trigger {}
+                if should_trigger {
+                    // hopefully this is enough time for the fixtures to turn on
+                    thread::sleep(Duration::from_millis(4));
+                    // TODO gpio
+                }
 
                 should_trigger = tick_result == TickResult::TriggerCapture;
             }
