@@ -1,10 +1,11 @@
 use std::sync::{Arc, RwLock};
 
+use clap::Parser;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::{
-    config::ServerConfig,
+    config::{CliConfig, ServerConfig},
     renderer::Renderer,
     state::{SharedState, StageState},
 };
@@ -48,7 +49,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let config = ServerConfig::default();
+    // parse cli args
+    let config = ServerConfig::from(CliConfig::parse());
 
     info!("Starting light stage server..");
 
