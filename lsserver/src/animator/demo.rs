@@ -54,4 +54,8 @@ impl Animator for DemoAnimator {
 
         true // demo never dies
     }
+
+    fn total_frames(&self) -> Option<usize> {
+        None
+    }
 }
