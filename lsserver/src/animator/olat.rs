@@ -63,4 +63,8 @@ impl Animator for OlatAnimator {
 
         true
     }
+
+    fn total_frames(&self) -> Option<usize> {
+        Some(self.num_arcs * self.lights_per_arc)
+    }
 }

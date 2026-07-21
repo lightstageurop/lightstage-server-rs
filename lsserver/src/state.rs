@@ -1,20 +1,25 @@
 //! Internal light stage state(s)
 
-use std::sync::{Arc, RwLock};
+use std::{
+    mem,
+    sync::{Arc, RwLock},
+    time::Instant,
+};
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
     LightStageFrame,
-    animator::{ActiveAnimator, Animator, DemoAnimator, OlatAnimator},
+    animator::{ActiveAnimator, Animator, DemoAnimator, OlatAnimator, PlaybackAnimator},
+    api::ModeRequest,
     config::ServerConfig,
     renderer::Renderer,
 };
 
 /// Defines the active operation mode of the light stage.
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
 pub enum StageMode {
     /// Runs a pleasing background animation
     #[default]
@@ -25,14 +30,52 @@ pub enum StageMode {
     /// Intended to be used for slow, or no capture. Shutter synchronisation is not guaranteed.
     Manual,
     /// Plays back a pre-loaded sequence of frames. Used for capture.
-    Playback { capture_fps: f64 },
+    Playback,
     /// One Light At a Time
-    OLAT { capture_hz: f64 },
+    OLAT,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct CaptureConfig {
+    pub capture_hz: f64,
+}
+
+impl CaptureConfig {
+    pub fn validate(self, config: &ServerConfig) -> anyhow::Result<()> {
+        let max_hz = 1_000.0 / config.refresh_rate_ms as f64;
+        if !self.capture_hz.is_finite() || self.capture_hz <= 0.0 {
+            anyhow::bail!("Capture rate must be a positive finite number");
+        }
+        if self.capture_hz > max_hz {
+            anyhow::bail!(
+                "Requested capture rate ({:.1} Hz) exceeds maximum supported rate ({:.1} Hz)",
+                self.capture_hz,
+                max_hz
+            );
+        }
+        Ok(())
+    }
 }
 
 /// Metadata about a capturing session (eg. an OLAT sequence)
 #[derive(Debug, Clone)]
-pub struct CaptureSession {}
+pub struct CaptureSession {
+    pub current_frame_idx: usize,
+    pub total_frames: usize,
+    pub config: CaptureConfig,
+    pub started_at: Instant,
+}
+
+impl CaptureSession {
+    pub fn new(total_frames: usize, config: CaptureConfig) -> Self {
+        Self {
+            current_frame_idx: 0,
+            total_frames,
+            config,
+            started_at: Instant::now(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TickResult {
@@ -48,6 +91,8 @@ pub struct StageState {
     renderer: Renderer,
     /// Current frame for [`StageMode::Manual`]
     pub current_frame: LightStageFrame,
+    /// Trigger queued for [`StageMode::Manual`]?
+    pub manual_capture_requested: bool,
     /// Currently active capture session
     pub active_session: Option<CaptureSession>,
 
@@ -62,6 +107,7 @@ impl StageState {
             mode: StageMode::default(),
             renderer,
             current_frame: LightStageFrame::black(),
+            manual_capture_requested: false,
             active_session: None,
             animator: ActiveAnimator::Demo(DemoAnimator::new(0.2, &config)),
             config,
@@ -71,10 +117,19 @@ impl StageState {
     pub fn advance_tick(&mut self, dest: &mut LightStageFrame) -> TickResult {
         if self.mode == StageMode::Manual {
             dest.clone_from(&self.current_frame);
-            TickResult::Continue
+            if mem::take(&mut self.manual_capture_requested) {
+                TickResult::TriggerCapture
+            } else {
+                TickResult::Continue
+            }
         } else {
             let still_active = self.animator.tick(&mut self.renderer);
             self.commit_and_render();
+
+            if let Some(session) = &mut self.active_session {
+                session.current_frame_idx += 1;
+            }
+
             if still_active {
                 let trigger = self.mode != StageMode::Demo;
                 dest.clone_from(&self.current_frame);
@@ -85,32 +140,63 @@ impl StageState {
                 }
             } else {
                 // sequence ended. transition to idle
-                self.transition_to(StageMode::Demo);
+                self.transition_to_demo();
                 dest.clone_from(&self.current_frame);
                 TickResult::Finished
             }
         }
     }
 
+    /// Internal helper for transition to [`StageMode::Demo`]. Can never fail.
+    fn transition_to_manual(&mut self) {
+        self.mode = StageMode::Manual;
+        self.active_session = None;
+        self.animator = ActiveAnimator::None;
+    }
+
+    /// Internal helper for transition to [`StageMode::Demo`]. Can never fail.
+    fn transition_to_demo(&mut self) {
+        self.mode = StageMode::Demo;
+        self.active_session = None;
+        self.animator = ActiveAnimator::None;
+    }
+
     /// Transition to a new state
-    pub fn transition_to(&mut self, new_mode: StageMode) {
-        self.mode = new_mode;
-        match new_mode {
-            StageMode::Demo => {
-                let anim = DemoAnimator::new(0.2, &self.config);
-                self.animator = ActiveAnimator::Demo(anim);
+    pub fn try_transition_to(&mut self, mode_req: ModeRequest) -> anyhow::Result<()> {
+        match mode_req {
+            ModeRequest::Demo => {
+                self.mode = StageMode::Demo;
+                self.active_session = None;
+                self.animator = ActiveAnimator::Demo(DemoAnimator::new(0.2, &self.config));
             }
-            StageMode::Manual => {
+            ModeRequest::Manual => {
+                self.mode = StageMode::Manual;
+                self.active_session = None;
                 self.animator = ActiveAnimator::None;
             }
-            StageMode::Playback { .. } => {
-                todo!()
+            ModeRequest::Playback { config } => {
+                config.validate(&self.config)?;
+                let anim = PlaybackAnimator::new();
+                self.mode = StageMode::Playback;
+                self.active_session = Some(CaptureSession::new(
+                    anim.total_frames().unwrap_or(0),
+                    config,
+                ));
+                self.animator = ActiveAnimator::Playback(anim);
             }
-            StageMode::OLAT { .. } => {
+            ModeRequest::OLAT { config } => {
+                config.validate(&self.config)?;
                 let anim = OlatAnimator::new(&self.config);
+                self.mode = StageMode::OLAT;
+                self.active_session = Some(CaptureSession::new(
+                    anim.total_frames().unwrap_or(0),
+                    config,
+                ));
                 self.animator = ActiveAnimator::OLAT(anim);
             }
         }
+
+        Ok(())
     }
 
     /// Update an rgb and a white fixture as a pair.
@@ -123,7 +209,7 @@ impl StageState {
         rgb: Option<(u16, u16, u16)>,
         white: Option<(u16, u16, u16)>,
     ) {
-        self.transition_to(StageMode::Manual);
+        self.transition_to_manual();
         if let Some(rgb) = rgb {
             self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
         }
@@ -147,7 +233,7 @@ impl StageState {
             ),
         >,
     ) {
-        self.transition_to(StageMode::Manual);
+        self.transition_to_manual();
         for (arc_idx, light_idx, rgb, white) in fixtures {
             if let Some(rgb) = rgb {
                 self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
@@ -169,7 +255,7 @@ impl StageState {
         rgb: Option<(u16, u16, u16)>,
         white: Option<(u16, u16, u16)>,
     ) {
-        self.transition_to(StageMode::Manual);
+        self.transition_to_manual();
         if let Some(rgb) = rgb {
             for light in &mut self.renderer.rgb_fixtures[arc_idx] {
                 light.set_color(rgb.0, rgb.1, rgb.2);
@@ -191,7 +277,7 @@ impl StageState {
         rgb: Option<(u16, u16, u16)>,
         white: Option<(u16, u16, u16)>,
     ) {
-        self.transition_to(StageMode::Manual);
+        self.transition_to_manual();
         if let Some(rgb) = rgb {
             for arc in &mut self.renderer.rgb_fixtures {
                 for light in arc {

@@ -8,8 +8,18 @@ pub struct PlaybackAnimator {
     seq_index: usize,
 }
 
+impl PlaybackAnimator {
+    pub fn new() -> Self {
+        todo!()
+    }
+}
+
 impl Animator for PlaybackAnimator {
     fn tick(&mut self, renderer: &mut crate::renderer::Renderer) -> bool {
         todo!()
+    }
+
+    fn total_frames(&self) -> Option<usize> {
+        Some(self.sequence.len())
     }
 }

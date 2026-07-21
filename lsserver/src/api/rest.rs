@@ -22,6 +22,7 @@ use std::net::SocketAddr;
 use axum::{
     Json,
     extract::{Path, State},
+    http::StatusCode,
     routing::any,
 };
 use tokio::net::TcpListener;
@@ -32,7 +33,7 @@ use utoipa_rapidoc::RapiDoc;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
-    api::{ApiState, UpdateColourRequest, UpdateFixturesRequest, ws::ws_handler},
+    api::{ApiState, ModeRequest, UpdateColourRequest, UpdateFixturesRequest, ws::ws_handler},
     config::ServerConfig,
     state::{SharedState, StageMode},
 };
@@ -55,6 +56,7 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
         .routes(routes!(set_arc))
         .routes(routes!(set_fixture))
         .routes(routes!(set_fixtures))
+        .routes(routes!(manual_trigger))
         .split_for_parts();
 
     // host swagger / rapidocs
@@ -118,11 +120,16 @@ async fn get_mode(State(api): State<ApiState>) -> Json<StageMode> {
     path = "/api/mode",
     tag = CONFIG_TAG,
     responses(
-        (status = 200, description = "Set mode success")
+        (status = 200, description = "Set mode success"),
+        (status = 400, description = "Invalid mode parameters", body = String)
     )
 )]
-async fn set_mode(State(api): State<ApiState>, Json(payload): Json<StageMode>) {
-    api.set_mode(payload);
+async fn set_mode(
+    State(api): State<ApiState>,
+    Json(payload): Json<ModeRequest>,
+) -> Result<(), (StatusCode, String)> {
+    api.set_mode(payload)
+        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))
 }
 
 /// Set the entire light stage to a uniform colour.
@@ -211,4 +218,21 @@ async fn set_fixtures(
             .map(|req| (req.arc_idx, req.light_idx, req.colour.rgb, req.colour.white))
             .collect(),
     );
+}
+
+/// Trigger a capture.
+///
+/// Counterpart to [`crate::api::ws::WsCommand::ManualTrigger`]
+#[utoipa::path(
+    post,
+    path = "/api/manual/trigger",
+    tag = MANUAL_TAG,
+    responses(
+        (status = 200, description = "Trigger success"),
+        (status = 400, description = "Failed to trigger cameras", body = String)
+    )
+)]
+async fn manual_trigger(State(api): State<ApiState>) -> Result<(), (StatusCode, String)> {
+    api.trigger_manual()
+        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))
 }

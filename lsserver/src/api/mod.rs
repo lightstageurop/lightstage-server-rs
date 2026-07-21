@@ -13,7 +13,7 @@ use utoipa::ToSchema;
 
 use crate::{
     config::ServerConfig,
-    state::{SharedState, StageMode},
+    state::{CaptureConfig, SharedState, StageMode},
 };
 
 /// Generic colour of a 3-channel fixture.
@@ -41,6 +41,15 @@ struct UpdateFixturesRequest {
     colour: UpdateColourRequest,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type")]
+pub enum ModeRequest {
+    Demo,
+    Manual,
+    OLAT { config: CaptureConfig },
+    Playback { config: CaptureConfig },
+}
+
 /// An application service layer if you will to handle updating state.
 ///
 /// Decouples the hardware ([`StageState`]) from api transport protocols. eg. REST, websocket.
@@ -58,10 +67,9 @@ impl ApiState {
     }
 
     /// Update the current operation mode of the light stage.
-    pub fn set_mode(&self, mode: StageMode) {
-        // TODO validate that capture hz for Olat and playback are valid here and return option?
+    pub fn set_mode(&self, mode: ModeRequest) -> anyhow::Result<()> {
         let mut lock = self.state.write().unwrap();
-        lock.transition_to(mode);
+        lock.try_transition_to(mode)
     }
 
     /// Updates colour of a single specified fixture.
@@ -126,5 +134,22 @@ impl ApiState {
             .write()
             .unwrap()
             .update_rgb_and_white_batch_fixtures(mapped);
+    }
+
+    /// Trigger a capture for manual mode.
+    ///
+    /// Will error if not in manual mode, or trigger already pending.
+    pub fn trigger_manual(&self) -> anyhow::Result<()> {
+        let mut lock = self.state.write().unwrap();
+
+        if lock.mode != StageMode::Manual {
+            anyhow::bail!("Manual trigger only available in manual mode");
+        }
+        if lock.manual_capture_requested {
+            anyhow::bail!("Manual trigger already pending");
+        }
+
+        lock.manual_capture_requested = true;
+        Ok(())
     }
 }

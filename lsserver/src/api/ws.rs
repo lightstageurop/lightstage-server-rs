@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
 
 use crate::{
-    api::{ApiState, UpdateColourRequest, UpdateFixturesRequest},
+    api::{ApiState, ModeRequest, UpdateColourRequest, UpdateFixturesRequest},
     config::ServerConfig,
     state::StageMode,
 };
@@ -37,7 +37,7 @@ pub enum WsCommand {
     /// Get the current operation mode of the light stage.
     GetMode,
     /// Set the operation mode of the light stage.
-    SetMode(StageMode),
+    SetMode(ModeRequest),
     /// Set the entire light stage to a uniform colour.
     SetLightstage(UpdateColourRequest),
     ///  Set an arc to a uniform colour.
@@ -53,6 +53,7 @@ pub enum WsCommand {
     },
     /// Update multiple fixtures' colours.
     SetFixtures(Vec<UpdateFixturesRequest>),
+    ManualTrigger,
 }
 
 /// Outgoing websocket response
@@ -123,10 +124,13 @@ fn execute_command(command: WsCommand, api: &ApiState) -> Option<WsResponse> {
     match command {
         WsCommand::GetConfig => Some(WsResponse::Config(api.config)),
         WsCommand::GetMode => Some(WsResponse::Mode(api.get_mode())),
-        WsCommand::SetMode(mode) => {
-            api.set_mode(mode);
-            None
-        }
+        WsCommand::SetMode(mode) => match api.set_mode(mode) {
+            Ok(()) => None,
+            Err(err) => Some(WsResponse::Error {
+                code: WsErrorKind::InvalidPayload,
+                message: err.to_string(),
+            }),
+        },
         WsCommand::SetFixture {
             arc_idx,
             light_idx,
@@ -151,5 +155,12 @@ fn execute_command(command: WsCommand, api: &ApiState) -> Option<WsResponse> {
             api.set_lightstage(colour.rgb, colour.white);
             None
         }
+        WsCommand::ManualTrigger => match api.trigger_manual() {
+            Ok(()) => None,
+            Err(err) => Some(WsResponse::Error {
+                code: WsErrorKind::InvalidPayload,
+                message: err.to_string(),
+            }),
+        },
     }
 }
