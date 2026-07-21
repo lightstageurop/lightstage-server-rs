@@ -99,6 +99,18 @@ pub enum WsErrorKind {
     InvalidPayload,
 }
 
+impl<E: ToString> From<Result<(), E>> for WsResponse {
+    fn from(res: Result<(), E>) -> Self {
+        match res {
+            Ok(()) => WsResponse::Ok,
+            Err(err) => WsResponse::Error {
+                code: WsErrorKind::InvalidPayload,
+                message: err.to_string(),
+            },
+        }
+    }
+}
+
 pub async fn ws_handler(ws: WebSocketUpgrade, State(api): State<ApiState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, api))
 }
@@ -108,33 +120,31 @@ async fn handle_socket(mut socket: WebSocket, api: ApiState) {
 
     while let Some(Ok(msg)) = socket.recv().await {
         match msg {
-            Message::Binary(bytes) => match ciborium::from_reader::<WsRequest, _>(&bytes[..]) {
-                Ok(req) => {
-                    let response = execute_command(req.command, &api);
-                    let outbound = WsServerMessage::Response {
-                        id: req.id,
-                        response,
-                    };
-                    if send_message(&mut socket, &outbound).await.is_err() {
-                        error!("Failed to transmit websocket response! Dropping connection.");
-                        break;
+            Message::Binary(bytes) => {
+                let outbound = match ciborium::from_reader::<WsRequest, _>(&bytes[..]) {
+                    Ok(req) => {
+                        let response = execute_command(req.command, &api);
+                        WsServerMessage::Response {
+                            id: req.id,
+                            response,
+                        }
                     }
-                }
-                Err(e) => {
-                    let err_response = WsResponse::Error {
-                        code: WsErrorKind::InvalidPayload,
-                        message: format!("Invalid CBOR payload: {e}"),
-                    };
-                    let outbound = WsServerMessage::Response {
-                        id: None,
-                        response: err_response,
-                    };
-                    if send_message(&mut socket, &outbound).await.is_err() {
-                        error!("Failed to transmit websocket error response! Dropping connection.");
-                        break;
+                    Err(e) => {
+                        let err_response = WsResponse::Error {
+                            code: WsErrorKind::InvalidPayload,
+                            message: format!("Invalid CBOR payload: {e}"),
+                        };
+                        WsServerMessage::Response {
+                            id: None,
+                            response: err_response,
+                        }
                     }
+                };
+                if send_message(&mut socket, &outbound).await.is_err() {
+                    error!("Failed to transmit websocket error response! Dropping connection.");
+                    break;
                 }
-            },
+            }
             Message::Close(_) => {
                 debug!("Websocket client disconnected.");
                 break;
@@ -157,43 +167,28 @@ fn execute_command(command: WsCommand, api: &ApiState) -> WsResponse {
     match command {
         WsCommand::GetConfig => WsResponse::Config(api.config),
         WsCommand::GetMode => WsResponse::Mode(api.get_mode()),
-        WsCommand::SetMode(mode) => match api.set_mode(mode) {
-            Ok(()) => WsResponse::Ok,
-            Err(err) => WsResponse::Error {
-                code: WsErrorKind::InvalidPayload,
-                message: err.to_string(),
-            },
-        },
+        WsCommand::SetMode(mode) => api.set_mode(mode).into(),
         WsCommand::SetFixture {
             arc_idx,
             light_idx,
             colour,
-        } => {
-            api.set_fixture(arc_idx, light_idx, colour.rgb, colour.white);
-            WsResponse::Ok
-        }
+        } => api
+            .set_fixture(arc_idx, light_idx, colour.rgb, colour.white)
+            .into(),
         WsCommand::SetFixtures(fixtures) => {
             let mapped = fixtures
                 .into_iter()
                 .map(|req| (req.arc_idx, req.light_idx, req.colour.rgb, req.colour.white))
                 .collect();
-            api.set_fixtures(mapped);
-            WsResponse::Ok
+            api.set_fixtures(mapped).into()
         }
         WsCommand::SetArc { arc_idx, colour } => {
-            api.set_arc(arc_idx, colour.rgb, colour.white);
-            WsResponse::Ok
+            api.set_arc(arc_idx, colour.rgb, colour.white).into()
         }
         WsCommand::SetLightstage(colour) => {
             api.set_lightstage(colour.rgb, colour.white);
             WsResponse::Ok
         }
-        WsCommand::ManualTrigger => match api.trigger_manual() {
-            Ok(()) => WsResponse::Ok,
-            Err(err) => WsResponse::Error {
-                code: WsErrorKind::InvalidPayload,
-                message: err.to_string(),
-            },
-        },
+        WsCommand::ManualTrigger => api.trigger_manual().into(),
     }
 }

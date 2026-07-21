@@ -71,3 +71,28 @@ impl From<CliConfig> for ServerConfig {
         }
     }
 }
+
+impl ServerConfig {
+    /// Bounds check for `arc_idx`
+    pub fn validate_arc(&self, arc_idx: usize) -> anyhow::Result<()> {
+        if arc_idx >= self.num_arcs {
+            anyhow::bail!(
+                "Arc index {arc_idx} out of bounds (max: {})",
+                self.num_arcs - 1
+            );
+        }
+        Ok(())
+    }
+
+    /// Bounds check for `light_idx`
+    pub fn validate_fixture(&self, arc_idx: usize, light_idx: usize) -> anyhow::Result<()> {
+        self.validate_arc(arc_idx)?;
+        if light_idx >= self.lights_per_arc {
+            anyhow::bail!(
+                "Light index {light_idx} out of bounds for arc {arc_idx} (max light_idx per arc: {})",
+                self.lights_per_arc - 1
+            );
+        }
+        Ok(())
+    }
+}

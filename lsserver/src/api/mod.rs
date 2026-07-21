@@ -81,7 +81,8 @@ impl ApiState {
         light_idx: usize,
         rgb: Option<FixtureColour>,
         white: Option<FixtureColour>,
-    ) {
+    ) -> anyhow::Result<()> {
+        self.config.validate_fixture(arc_idx, light_idx)?;
         self.state
             .write()
             .unwrap()
@@ -91,6 +92,7 @@ impl ApiState {
                 rgb.map(Into::into),
                 white.map(Into::into),
             );
+        Ok(())
     }
 
     /// Updates colour of an entire arc uniformly.
@@ -101,12 +103,14 @@ impl ApiState {
         arc_idx: usize,
         rgb: Option<FixtureColour>,
         white: Option<FixtureColour>,
-    ) {
+    ) -> anyhow::Result<()> {
+        self.config.validate_arc(arc_idx)?;
         self.state.write().unwrap().update_rgb_and_white_arc(
             arc_idx,
             rgb.map(Into::into),
             white.map(Into::into),
         );
+        Ok(())
     }
 
     /// Updates entire light stage to one uniform colour.
@@ -125,7 +129,12 @@ impl ApiState {
     pub fn set_fixtures(
         &self,
         fixtures: Vec<(usize, usize, Option<FixtureColour>, Option<FixtureColour>)>,
-    ) {
+    ) -> anyhow::Result<()> {
+        // validate entire batch up front
+        for &(arc_idx, light_idx, _, _) in &fixtures {
+            self.config.validate_fixture(arc_idx, light_idx)?;
+        }
+
         let mapped = fixtures
             .into_iter()
             .map(|(a, l, r, w)| (a, l, r.map(Into::into), w.map(Into::into)));
@@ -134,6 +143,7 @@ impl ApiState {
             .write()
             .unwrap()
             .update_rgb_and_white_batch_fixtures(mapped);
+        Ok(())
     }
 
     /// Trigger a capture for manual mode.
