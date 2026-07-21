@@ -36,18 +36,23 @@ pub enum StageMode {
     OLAT,
 }
 
+/// Asynchronous state change events which can be emitted
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StageEvent {
+    /// Emitted when stage transitions to a new [`StageMode`]
     ModeChanged(StageMode),
+    /// Emitted when an active capture session completes.
     CaptureFinished,
 }
 
+/// Configuration parameters for a capturing session.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct CaptureConfig {
     pub capture_hz: f64,
 }
 
 impl CaptureConfig {
+    /// Validates capture frequency against global [`ServerConfig`].
     pub fn validate(self, config: &ServerConfig) -> anyhow::Result<()> {
         let max_hz = 1_000.0 / config.refresh_rate_ms as f64;
         if !self.capture_hz.is_finite() || self.capture_hz <= 0.0 {
@@ -103,9 +108,8 @@ pub struct StageState {
     pub manual_capture_requested: bool,
     /// Currently active capture session
     pub active_session: Option<CaptureSession>,
-
+    /// Currently active animator
     animator: ActiveAnimator,
-
     config: ServerConfig,
 }
 

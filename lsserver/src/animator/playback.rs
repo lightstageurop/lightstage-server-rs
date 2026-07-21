@@ -2,7 +2,7 @@ use crate::{LightStageFrame, animator::Animator};
 
 #[derive(Debug, Default)]
 pub struct PlaybackAnimator {
-    /// Loaded animation sequence for [`StageMode::Playback`]
+    /// Loaded animation sequence for [`crate::state::StageMode::Playback`]
     sequence: Vec<LightStageFrame>,
     /// Current frame index within sequence
     seq_index: usize,

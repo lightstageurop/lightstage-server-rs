@@ -52,10 +52,10 @@ pub enum ModeRequest {
 
 /// An application service layer if you will to handle updating state.
 ///
-/// Decouples the hardware ([`StageState`]) from api transport protocols. eg. REST, websocket.
+/// Decouples the hardware ([`crate::state::StageState`]) from api transport protocols. eg. REST, websocket.
 #[derive(Clone)]
 pub struct ApiState {
-    /// The underlying [`StageState`]
+    /// The underlying [`crate::state::StageState`]
     state: SharedState,
     config: ServerConfig,
 }

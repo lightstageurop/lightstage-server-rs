@@ -1,12 +1,12 @@
 //! # WebSocket API
 //!
-//! This interface provides much higher throughput and some more features over it's
-//! REST counterpart. ([`crate::api::rest`]).
+//! This interface provides much higher throughput and additional features over its
+//! REST counterpart ([`crate::api::rest`]).
 //! It should usually be preferred.
 //!
 //! The WebSocket endpoint is `/ws`.
 //!
-//! All messages are encoding using [CBOR][cbor].
+//! All messages are encoded using [CBOR][cbor].
 //!
 //! For a list of supported commands, see [`WsCommand`].
 //! There is no further API documentation yet, as there is with REST.
@@ -26,18 +26,18 @@ use tracing::{debug, error};
 use crate::{
     api::{ApiState, ModeRequest, UpdateColourRequest, UpdateFixturesRequest},
     config::ServerConfig,
-    state::{StageEvent, StageMode,
+    state::{StageEvent, StageMode},
 };
 
-/// Inbound websocket request
+/// An inbound websocket request, containing optional request ID
 #[derive(Debug, Clone, Deserialize)]
 pub struct WsRequest {
-    /// Optional command id, will be echoed by the server
+    /// Optional request ID, will be echoed by the server
     pub id: Option<u64>,
     pub command: WsCommand,
 }
 
-/// Inbound websocket commands
+/// Inbound WebSocket commands
 #[derive(Debug, Clone, Deserialize)]
 pub enum WsCommand {
     /// Get the server's configuration.
@@ -64,7 +64,7 @@ pub enum WsCommand {
     ManualTrigger,
 }
 
-/// Outbound websocket message
+/// Outbound WebSocket message
 #[derive(Debug, Clone, Serialize)]
 pub enum WsServerMessage {
     Response {
@@ -108,6 +108,7 @@ impl From<StageEvent> for WsEvent {
 /// Error codes that can be returned
 #[derive(Debug, Clone, Copy, Serialize)]
 pub enum WsErrorKind {
+    /// The incoming CBOR frame was malformed or failed validation.
     InvalidPayload,
 }
 
@@ -123,10 +124,12 @@ impl<E: ToString> From<Result<(), E>> for WsResponse {
     }
 }
 
+/// [`axum`] handler to upgrade incoming WebSocket connections.
 pub async fn ws_handler(ws: WebSocketUpgrade, State(api): State<ApiState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, api))
 }
 
+/// WebSocket event loop for a connected client.
 async fn handle_socket(mut socket: WebSocket, api: ApiState) {
     debug!("Websocket client connected.");
 
