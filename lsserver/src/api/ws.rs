@@ -26,7 +26,7 @@ use tracing::{debug, error};
 use crate::{
     api::{ApiState, ModeRequest, UpdateColourRequest, UpdateFixturesRequest},
     config::ServerConfig,
-    state::StageMode,
+    state::{StageEvent, StageMode,
 };
 
 /// Inbound websocket request
@@ -87,10 +87,22 @@ pub enum WsResponse {
     Error { code: WsErrorKind, message: String },
 }
 
+/// Server-broadcast events ent to WebSocket clients.
 #[derive(Debug, Clone, Serialize)]
 pub enum WsEvent {
+    /// Broadcast when light stage transitions to a new [`StageMode`]
     ModeChanged(StageMode),
-    // CaptureFinished
+    /// Broadcast when an active capture session completes.
+    CaptureFinished,
+}
+
+impl From<StageEvent> for WsEvent {
+    fn from(event: StageEvent) -> Self {
+        match event {
+            StageEvent::ModeChanged(stage_mode) => Self::ModeChanged(stage_mode),
+            StageEvent::CaptureFinished => Self::CaptureFinished,
+        }
+    }
 }
 
 /// Error codes that can be returned
@@ -118,40 +130,86 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(api): State<ApiState>) -> im
 async fn handle_socket(mut socket: WebSocket, api: ApiState) {
     debug!("Websocket client connected.");
 
-    while let Some(Ok(msg)) = socket.recv().await {
-        match msg {
-            Message::Binary(bytes) => {
-                let outbound = match ciborium::from_reader::<WsRequest, _>(&bytes[..]) {
-                    Ok(req) => {
-                        let response = execute_command(req.command, &api);
-                        WsServerMessage::Response {
-                            id: req.id,
-                            response,
-                        }
-                    }
-                    Err(e) => {
-                        let err_response = WsResponse::Error {
-                            code: WsErrorKind::InvalidPayload,
-                            message: format!("Invalid CBOR payload: {e}"),
-                        };
-                        WsServerMessage::Response {
-                            id: None,
-                            response: err_response,
-                        }
-                    }
-                };
-                if send_message(&mut socket, &outbound).await.is_err() {
-                    error!("Failed to transmit websocket error response! Dropping connection.");
+    let mut rx = { api.state.read().unwrap() }.tx.subscribe();
+
+    loop {
+        tokio::select! {
+            msg = socket.recv() => {
+                if !handle_incoming_msg(msg, &mut socket, &api).await {
                     break;
                 }
             }
-            Message::Close(_) => {
-                debug!("Websocket client disconnected.");
-                break;
+            event = rx.recv() => {
+                if !handle_broadcast_event(event, &mut socket).await {
+                    break;
+                }
             }
-            _ => {} // not a binary message, ignore.
         }
     }
+}
+
+/// Process incoming raw WebSocket message
+///
+/// Return `true` if connection should remain open,
+/// or `false` if disconnected or an unrecoverable error occured.
+async fn handle_incoming_msg<E>(
+    msg: Option<Result<Message, E>>,
+    socket: &mut WebSocket,
+    api: &ApiState,
+) -> bool {
+    let Some(Ok(msg)) = msg else {
+        // websocket client disconnected?
+        return false;
+    };
+    match msg {
+        Message::Binary(bytes) => {
+            let outbound = match ciborium::from_reader::<WsRequest, _>(&bytes[..]) {
+                Ok(req) => {
+                    let response = execute_command(req.command, api);
+                    WsServerMessage::Response {
+                        id: req.id,
+                        response,
+                    }
+                }
+                Err(e) => {
+                    let err_response = WsResponse::Error {
+                        code: WsErrorKind::InvalidPayload,
+                        message: format!("Invalid CBOR payload: {e}"),
+                    };
+                    WsServerMessage::Response {
+                        id: None,
+                        response: err_response,
+                    }
+                }
+            };
+            if send_message(socket, &outbound).await.is_err() {
+                error!("Failed to transmit websocket response! Dropping connection.");
+                return false;
+            }
+        }
+        Message::Close(_) => {
+            debug!("Websocket client disconnected.");
+            return false;
+        }
+        _ => {} // not a binary message, ignore.
+    }
+    true
+}
+
+/// Process system events from broadcast channel and sends them to connected clients.
+///
+/// Return `true` if connection should remain open,
+/// or `false` if disconnected or an unrecoverable error occured.
+async fn handle_broadcast_event<E>(event: Result<StageEvent, E>, socket: &mut WebSocket) -> bool {
+    let Ok(stage_event) = event else {
+        return false;
+    };
+
+    let outbound = WsServerMessage::Event(stage_event.into());
+    if send_message(socket, &outbound).await.is_err() {
+        return false;
+    }
+    true
 }
 
 /// Serialise outbound respones into CBOR message and send.

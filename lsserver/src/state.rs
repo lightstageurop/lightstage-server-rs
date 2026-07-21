@@ -7,6 +7,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
 use crate::{
@@ -33,6 +34,12 @@ pub enum StageMode {
     Playback,
     /// One Light At a Time
     OLAT,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StageEvent {
+    ModeChanged(StageMode),
+    CaptureFinished,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -88,6 +95,7 @@ pub enum TickResult {
 #[derive(Debug)]
 pub struct StageState {
     pub mode: StageMode,
+    pub tx: broadcast::Sender<StageEvent>,
     renderer: Renderer,
     /// Current frame for [`StageMode::Manual`]
     pub current_frame: LightStageFrame,
@@ -102,9 +110,14 @@ pub struct StageState {
 }
 
 impl StageState {
-    pub fn new(renderer: Renderer, config: ServerConfig) -> Self {
+    pub fn new(
+        renderer: Renderer,
+        config: ServerConfig,
+        tx: broadcast::Sender<StageEvent>,
+    ) -> Self {
         Self {
             mode: StageMode::default(),
+            tx,
             renderer,
             current_frame: LightStageFrame::black(),
             manual_capture_requested: false,
@@ -112,6 +125,10 @@ impl StageState {
             animator: ActiveAnimator::Demo(DemoAnimator::new(0.2, &config)),
             config,
         }
+    }
+
+    fn emit_event(&self, event: StageEvent) {
+        let _ = self.tx.send(event);
     }
 
     pub fn advance_tick(&mut self, dest: &mut LightStageFrame) -> TickResult {
@@ -140,6 +157,7 @@ impl StageState {
                 }
             } else {
                 // sequence ended. transition to idle
+                self.emit_event(StageEvent::CaptureFinished);
                 self.transition_to_demo();
                 dest.clone_from(&self.current_frame);
                 TickResult::Finished
@@ -152,6 +170,7 @@ impl StageState {
         self.mode = StageMode::Manual;
         self.active_session = None;
         self.animator = ActiveAnimator::None;
+        self.emit_event(StageEvent::ModeChanged(StageMode::Manual));
     }
 
     /// Internal helper for transition to [`StageMode::Demo`]. Can never fail.
@@ -159,41 +178,47 @@ impl StageState {
         self.mode = StageMode::Demo;
         self.active_session = None;
         self.animator = ActiveAnimator::None;
+        self.emit_event(StageEvent::ModeChanged(StageMode::Demo));
     }
 
     /// Transition to a new state
     pub fn try_transition_to(&mut self, mode_req: ModeRequest) -> anyhow::Result<()> {
-        match mode_req {
+        let new_mode = match mode_req {
             ModeRequest::Demo => {
-                self.mode = StageMode::Demo;
                 self.active_session = None;
                 self.animator = ActiveAnimator::Demo(DemoAnimator::new(0.2, &self.config));
+                StageMode::Demo
             }
             ModeRequest::Manual => {
-                self.mode = StageMode::Manual;
                 self.active_session = None;
                 self.animator = ActiveAnimator::None;
+                StageMode::Manual
             }
             ModeRequest::Playback { config } => {
                 config.validate(&self.config)?;
                 let anim = PlaybackAnimator::new();
-                self.mode = StageMode::Playback;
                 self.active_session = Some(CaptureSession::new(
                     anim.total_frames().unwrap_or(0),
                     config,
                 ));
                 self.animator = ActiveAnimator::Playback(anim);
+                StageMode::Playback
             }
             ModeRequest::OLAT { config } => {
                 config.validate(&self.config)?;
                 let anim = OlatAnimator::new(&self.config);
-                self.mode = StageMode::OLAT;
                 self.active_session = Some(CaptureSession::new(
                     anim.total_frames().unwrap_or(0),
                     config,
                 ));
                 self.animator = ActiveAnimator::OLAT(anim);
+                StageMode::OLAT
             }
+        };
+
+        if self.mode != new_mode {
+            self.mode = new_mode;
+            self.emit_event(StageEvent::ModeChanged(new_mode));
         }
 
         Ok(())
