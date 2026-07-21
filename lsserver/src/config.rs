@@ -6,6 +6,10 @@ use clap::Parser;
 use serde::Serialize;
 use utoipa::ToSchema;
 
+/// Command line arguments
+///
+/// We use [`clap`] to auto-generate the cli.
+/// The values from this struct override the defaults of [`ServerConfig`] when given.
 #[derive(Debug, Clone, Copy, Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct CliConfig {
@@ -23,6 +27,7 @@ pub struct CliConfig {
 /// Configuration parameters for the light stage server.
 ///
 /// Defines physical layout of the arcs/fixtures, network configuration of REST API, `KiNET`, etc.
+/// Not all fields have a corresponding option in [`CliConfig`] (eg. `num_arcs`), this is intentional.
 #[derive(Debug, Clone, Copy, ToSchema, Serialize)]
 pub struct ServerConfig {
     pub num_arcs: usize,
