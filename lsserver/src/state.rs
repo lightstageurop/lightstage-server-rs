@@ -169,7 +169,7 @@ impl StageState {
         }
     }
 
-    /// Internal helper for transition to [`StageMode::Demo`]. Can never fail.
+    /// Internal helper for transition to [`StageMode::Manual`]. Can never fail.
     fn transition_to_manual(&mut self) {
         self.mode = StageMode::Manual;
         self.active_session = None;
@@ -181,7 +181,7 @@ impl StageState {
     fn transition_to_demo(&mut self) {
         self.mode = StageMode::Demo;
         self.active_session = None;
-        self.animator = ActiveAnimator::None;
+        self.animator = ActiveAnimator::Demo(DemoAnimator::new(0.2, &self.config));
         self.emit_event(StageEvent::ModeChanged(StageMode::Demo));
     }
 
