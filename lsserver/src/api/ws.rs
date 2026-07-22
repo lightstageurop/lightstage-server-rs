@@ -37,6 +37,13 @@ pub struct WsRequest {
     pub command: WsCommand,
 }
 
+/// Helper to deserialise [`WsRequest::id`] before fully parsing the command.
+#[derive(Debug, Clone, Deserialize)]
+struct WsRawRequest {
+    pub id: Option<u64>,
+    pub command: Option<ciborium::Value>,
+}
+
 /// Inbound WebSocket commands
 #[derive(Debug, Clone, Deserialize)]
 pub enum WsCommand {
@@ -166,15 +173,31 @@ async fn handle_incoming_msg<E>(
     };
     match msg {
         Message::Binary(bytes) => {
-            let outbound = match ciborium::from_reader::<WsRequest, _>(&bytes[..]) {
-                Ok(req) => {
-                    let response = execute_command(req.command, api);
+            let outbound = match ciborium::from_reader::<WsRawRequest, _>(&bytes[..]) {
+                Ok(raw) => {
+                    // if request has an id, get it early
+                    let req_id = raw.id;
+                    let response = match raw.command {
+                        Some(cmd_val) => match cmd_val.deserialized::<WsCommand>() {
+                            Ok(cmd) => execute_command(cmd, api),
+                            Err(e) => WsResponse::Error {
+                                code: WsErrorKind::InvalidPayload,
+                                message: format!("Invalid command payload: {e}"),
+                            },
+                        },
+                        None => WsResponse::Error {
+                            code: WsErrorKind::InvalidPayload,
+                            message: "Missing 'command' field in payload".to_string(),
+                        },
+                    };
+                    // if cmd deserialisation fails, we still have req_id
                     WsServerMessage::Response {
-                        id: req.id,
+                        id: req_id,
                         response,
                     }
                 }
                 Err(e) => {
+                    // completely invalid payload
                     let err_response = WsResponse::Error {
                         code: WsErrorKind::InvalidPayload,
                         message: format!("Invalid CBOR payload: {e}"),
