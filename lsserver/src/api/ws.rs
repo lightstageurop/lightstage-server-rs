@@ -1,12 +1,12 @@
 //! # WebSocket API
 //!
-//! This interface provides much higher throughput and some more features over it's
-//! REST counterpart. ([`crate::api::rest`]).
+//! This interface provides much higher throughput and additional features over its
+//! REST counterpart ([`crate::api::rest`]).
 //! It should usually be preferred.
 //!
 //! The WebSocket endpoint is `/ws`.
 //!
-//! All messages are encoding using [CBOR][cbor].
+//! All messages are encoded using [CBOR][cbor].
 //!
 //! For a list of supported commands, see [`WsCommand`].
 //! There is no further API documentation yet, as there is with REST.
@@ -26,11 +26,23 @@ use tracing::{debug, error};
 use crate::{
     api::{ApiState, ModeRequest, UpdateColourRequest, UpdateFixturesRequest},
     config::ServerConfig,
-    state::StageMode,
+    state::{StageEvent, StageMode},
 };
 
-/// Inbound websocket commands
-#[derive(Debug, Deserialize)]
+/// An inbound websocket request, containing optional request ID.
+///
+/// We purposely leave `command` as an unparsed [`ciborium::Value`],
+/// so that we can deserialise `id` before fully parsing the command.
+#[derive(Debug, Clone, Deserialize)]
+struct WsRawRequest {
+    /// Optional request ID, will be echoed by the server
+    pub id: Option<u64>,
+    /// This will be parsed into a [`WsCommand`]
+    pub command: Option<ciborium::Value>,
+}
+
+/// Inbound WebSocket commands
+#[derive(Debug, Clone, Deserialize)]
 pub enum WsCommand {
     /// Get the server's configuration.
     GetConfig,
@@ -56,9 +68,21 @@ pub enum WsCommand {
     ManualTrigger,
 }
 
-/// Outgoing websocket response
+/// Outbound WebSocket message
+#[derive(Debug, Clone, Serialize)]
+pub enum WsServerMessage {
+    Response {
+        id: Option<u64>,
+        response: WsResponse,
+    },
+    Event(WsEvent),
+}
+
+/// An outgoing response to a [`WsCommand`].
 #[derive(Debug, Clone, Serialize)]
 pub enum WsResponse {
+    /// Success
+    Ok,
     /// The light stage's current operation mode
     Mode(StageMode),
     /// The server's config
@@ -67,100 +91,185 @@ pub enum WsResponse {
     Error { code: WsErrorKind, message: String },
 }
 
-/// Error codes that can be returned
-#[derive(Debug, Clone, Copy, Serialize)]
-pub enum WsErrorKind {
-    InvalidPayload,
+/// Server-broadcast events ent to WebSocket clients.
+#[derive(Debug, Clone, Serialize)]
+pub enum WsEvent {
+    /// Broadcast when light stage transitions to a new [`StageMode`]
+    ModeChanged(StageMode),
+    /// Broadcast when an active capture session completes.
+    CaptureFinished,
 }
 
-pub async fn ws_handler(ws: WebSocketUpgrade, State(api): State<ApiState>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, api))
-}
-
-async fn handle_socket(mut socket: WebSocket, api: ApiState) {
-    debug!("Websocket client connected.");
-
-    while let Some(Ok(msg)) = socket.recv().await {
-        match msg {
-            Message::Binary(bytes) => match ciborium::from_reader::<WsCommand, _>(&bytes[..]) {
-                Ok(cmd) => {
-                    if let Some(response) = execute_command(cmd, &api) {
-                        if send_response(&mut socket, &response).await.is_err() {
-                            error!("Failed to transmit websocket response! Dropping connection.");
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    let err_response = WsResponse::Error {
-                        code: WsErrorKind::InvalidPayload,
-                        message: format!("Invalid CBOR payload: {e}"),
-                    };
-                    if send_response(&mut socket, &err_response).await.is_err() {
-                        error!("Failed to transmit websocket error response! Dropping connection.");
-                        break;
-                    }
-                }
-            },
-            Message::Close(_) => {
-                debug!("Websocket client disconnected.");
-                break;
-            }
-            _ => {} // not a binary message, ignore.
+impl From<StageEvent> for WsEvent {
+    fn from(event: StageEvent) -> Self {
+        match event {
+            StageEvent::ModeChanged(stage_mode) => Self::ModeChanged(stage_mode),
+            StageEvent::CaptureFinished => Self::CaptureFinished,
         }
     }
 }
 
+/// Error codes that can be returned
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum WsErrorKind {
+    /// The incoming CBOR frame was malformed or failed validation.
+    InvalidPayload,
+}
+
+impl<E: ToString> From<Result<(), E>> for WsResponse {
+    fn from(res: Result<(), E>) -> Self {
+        match res {
+            Ok(()) => WsResponse::Ok,
+            Err(err) => WsResponse::Error {
+                code: WsErrorKind::InvalidPayload,
+                message: err.to_string(),
+            },
+        }
+    }
+}
+
+/// [`axum`] handler to upgrade incoming WebSocket connections.
+pub async fn ws_handler(ws: WebSocketUpgrade, State(api): State<ApiState>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_socket(socket, api))
+}
+
+/// WebSocket event loop for a connected client.
+async fn handle_socket(mut socket: WebSocket, api: ApiState) {
+    debug!("Websocket client connected.");
+
+    let mut rx = { api.state.read().unwrap() }.tx.subscribe();
+
+    loop {
+        tokio::select! {
+            msg = socket.recv() => {
+                if !handle_incoming_msg(msg, &mut socket, &api).await {
+                    break;
+                }
+            }
+            event = rx.recv() => {
+                if !handle_broadcast_event(event, &mut socket).await {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Process incoming raw WebSocket message
+///
+/// Return `true` if connection should remain open,
+/// or `false` if disconnected or an unrecoverable error occured.
+async fn handle_incoming_msg<E>(
+    msg: Option<Result<Message, E>>,
+    socket: &mut WebSocket,
+    api: &ApiState,
+) -> bool {
+    let Some(Ok(msg)) = msg else {
+        // websocket client disconnected?
+        return false;
+    };
+    match msg {
+        Message::Binary(bytes) => {
+            let outbound = match ciborium::from_reader::<WsRawRequest, _>(&bytes[..]) {
+                Ok(raw) => {
+                    // if request has an id, get it early
+                    let req_id = raw.id;
+                    let response = match raw.command {
+                        Some(cmd_val) => match cmd_val.deserialized::<WsCommand>() {
+                            Ok(cmd) => execute_command(cmd, api),
+                            Err(e) => WsResponse::Error {
+                                code: WsErrorKind::InvalidPayload,
+                                message: format!("Invalid command payload: {e}"),
+                            },
+                        },
+                        None => WsResponse::Error {
+                            code: WsErrorKind::InvalidPayload,
+                            message: "Missing 'command' field in payload".to_string(),
+                        },
+                    };
+                    // if cmd deserialisation fails, we still have req_id
+                    WsServerMessage::Response {
+                        id: req_id,
+                        response,
+                    }
+                }
+                Err(e) => {
+                    // completely invalid payload
+                    let err_response = WsResponse::Error {
+                        code: WsErrorKind::InvalidPayload,
+                        message: format!("Invalid CBOR payload: {e}"),
+                    };
+                    WsServerMessage::Response {
+                        id: None,
+                        response: err_response,
+                    }
+                }
+            };
+            if send_message(socket, &outbound).await.is_err() {
+                error!("Failed to transmit websocket response! Dropping connection.");
+                return false;
+            }
+        }
+        Message::Close(_) => {
+            debug!("Websocket client disconnected.");
+            return false;
+        }
+        _ => {} // not a binary message, ignore.
+    }
+    true
+}
+
+/// Process system events from broadcast channel and sends them to connected clients.
+///
+/// Return `true` if connection should remain open,
+/// or `false` if disconnected or an unrecoverable error occured.
+async fn handle_broadcast_event<E>(event: Result<StageEvent, E>, socket: &mut WebSocket) -> bool {
+    let Ok(stage_event) = event else {
+        return false;
+    };
+
+    let outbound = WsServerMessage::Event(stage_event.into());
+    if send_message(socket, &outbound).await.is_err() {
+        return false;
+    }
+    true
+}
+
 /// Serialise outbound respones into CBOR message and send.
-async fn send_response(socket: &mut WebSocket, response: &WsResponse) -> anyhow::Result<()> {
+async fn send_message(socket: &mut WebSocket, message: &WsServerMessage) -> anyhow::Result<()> {
     let mut buf: Vec<u8> = Vec::new();
-    ciborium::into_writer(&response, &mut buf)?;
+    ciborium::into_writer(&message, &mut buf)?;
     socket.send(Message::Binary(buf.into())).await?;
     Ok(())
 }
 
 /// Interpret commands and update underlying state ([`ApiState`]).
-fn execute_command(command: WsCommand, api: &ApiState) -> Option<WsResponse> {
+fn execute_command(command: WsCommand, api: &ApiState) -> WsResponse {
     match command {
-        WsCommand::GetConfig => Some(WsResponse::Config(api.config)),
-        WsCommand::GetMode => Some(WsResponse::Mode(api.get_mode())),
-        WsCommand::SetMode(mode) => match api.set_mode(mode) {
-            Ok(()) => None,
-            Err(err) => Some(WsResponse::Error {
-                code: WsErrorKind::InvalidPayload,
-                message: err.to_string(),
-            }),
-        },
+        WsCommand::GetConfig => WsResponse::Config(api.config),
+        WsCommand::GetMode => WsResponse::Mode(api.get_mode()),
+        WsCommand::SetMode(mode) => api.set_mode(mode).into(),
         WsCommand::SetFixture {
             arc_idx,
             light_idx,
             colour,
-        } => {
-            api.set_fixture(arc_idx, light_idx, colour.rgb, colour.white);
-            None
-        }
+        } => api
+            .set_fixture(arc_idx, light_idx, colour.rgb, colour.white)
+            .into(),
         WsCommand::SetFixtures(fixtures) => {
             let mapped = fixtures
                 .into_iter()
                 .map(|req| (req.arc_idx, req.light_idx, req.colour.rgb, req.colour.white))
                 .collect();
-            api.set_fixtures(mapped);
-            None
+            api.set_fixtures(mapped).into()
         }
         WsCommand::SetArc { arc_idx, colour } => {
-            api.set_arc(arc_idx, colour.rgb, colour.white);
-            None
+            api.set_arc(arc_idx, colour.rgb, colour.white).into()
         }
         WsCommand::SetLightstage(colour) => {
             api.set_lightstage(colour.rgb, colour.white);
-            None
+            WsResponse::Ok
         }
-        WsCommand::ManualTrigger => match api.trigger_manual() {
-            Ok(()) => None,
-            Err(err) => Some(WsResponse::Error {
-                code: WsErrorKind::InvalidPayload,
-                message: err.to_string(),
-            }),
-        },
+        WsCommand::ManualTrigger => api.trigger_manual().into(),
     }
 }

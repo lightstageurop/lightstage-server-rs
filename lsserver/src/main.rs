@@ -1,6 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use clap::Parser;
+use tokio::sync::broadcast;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -54,6 +55,8 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting light stage server..");
 
+    let (tx, _rx) = broadcast::channel(100);
+
     let mut renderer = Renderer::new(&config);
     for universe in 0..config.num_arcs {
         for fixture in 0..config.lights_per_arc {
@@ -64,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
             renderer.white_fixtures[universe].push(fixtures::WhiteFixture::new(address).unwrap());
         }
     }
-    let state: SharedState = Arc::new(RwLock::new(StageState::new(renderer, config)));
+    let state: SharedState = Arc::new(RwLock::new(StageState::new(renderer, config, tx.clone())));
 
     network::NetworkManager::new(state.clone(), config).start()?;
 

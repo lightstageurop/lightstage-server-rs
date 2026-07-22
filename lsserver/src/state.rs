@@ -7,6 +7,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
 use crate::{
@@ -35,12 +36,23 @@ pub enum StageMode {
     OLAT,
 }
 
+/// Asynchronous state change events which can be emitted
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StageEvent {
+    /// Emitted when stage transitions to a new [`StageMode`]
+    ModeChanged(StageMode),
+    /// Emitted when an active capture session completes.
+    CaptureFinished,
+}
+
+/// Configuration parameters for a capturing session.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct CaptureConfig {
     pub capture_hz: f64,
 }
 
 impl CaptureConfig {
+    /// Validates capture frequency against global [`ServerConfig`].
     pub fn validate(self, config: &ServerConfig) -> anyhow::Result<()> {
         let max_hz = 1_000.0 / config.refresh_rate_ms as f64;
         if !self.capture_hz.is_finite() || self.capture_hz <= 0.0 {
@@ -88,6 +100,7 @@ pub enum TickResult {
 #[derive(Debug)]
 pub struct StageState {
     pub mode: StageMode,
+    pub tx: broadcast::Sender<StageEvent>,
     renderer: Renderer,
     /// Current frame for [`StageMode::Manual`]
     pub current_frame: LightStageFrame,
@@ -95,16 +108,20 @@ pub struct StageState {
     pub manual_capture_requested: bool,
     /// Currently active capture session
     pub active_session: Option<CaptureSession>,
-
+    /// Currently active animator
     animator: ActiveAnimator,
-
     config: ServerConfig,
 }
 
 impl StageState {
-    pub fn new(renderer: Renderer, config: ServerConfig) -> Self {
+    pub fn new(
+        renderer: Renderer,
+        config: ServerConfig,
+        tx: broadcast::Sender<StageEvent>,
+    ) -> Self {
         Self {
             mode: StageMode::default(),
+            tx,
             renderer,
             current_frame: LightStageFrame::black(),
             manual_capture_requested: false,
@@ -112,6 +129,10 @@ impl StageState {
             animator: ActiveAnimator::Demo(DemoAnimator::new(0.2, &config)),
             config,
         }
+    }
+
+    fn emit_event(&self, event: StageEvent) {
+        let _ = self.tx.send(event);
     }
 
     pub fn advance_tick(&mut self, dest: &mut LightStageFrame) -> TickResult {
@@ -140,6 +161,7 @@ impl StageState {
                 }
             } else {
                 // sequence ended. transition to idle
+                self.emit_event(StageEvent::CaptureFinished);
                 self.transition_to_demo();
                 dest.clone_from(&self.current_frame);
                 TickResult::Finished
@@ -147,53 +169,60 @@ impl StageState {
         }
     }
 
-    /// Internal helper for transition to [`StageMode::Demo`]. Can never fail.
+    /// Internal helper for transition to [`StageMode::Manual`]. Can never fail.
     fn transition_to_manual(&mut self) {
         self.mode = StageMode::Manual;
         self.active_session = None;
         self.animator = ActiveAnimator::None;
+        self.emit_event(StageEvent::ModeChanged(StageMode::Manual));
     }
 
     /// Internal helper for transition to [`StageMode::Demo`]. Can never fail.
     fn transition_to_demo(&mut self) {
         self.mode = StageMode::Demo;
         self.active_session = None;
-        self.animator = ActiveAnimator::None;
+        self.animator = ActiveAnimator::Demo(DemoAnimator::new(0.2, &self.config));
+        self.emit_event(StageEvent::ModeChanged(StageMode::Demo));
     }
 
     /// Transition to a new state
     pub fn try_transition_to(&mut self, mode_req: ModeRequest) -> anyhow::Result<()> {
-        match mode_req {
+        let new_mode = match mode_req {
             ModeRequest::Demo => {
-                self.mode = StageMode::Demo;
                 self.active_session = None;
                 self.animator = ActiveAnimator::Demo(DemoAnimator::new(0.2, &self.config));
+                StageMode::Demo
             }
             ModeRequest::Manual => {
-                self.mode = StageMode::Manual;
                 self.active_session = None;
                 self.animator = ActiveAnimator::None;
+                StageMode::Manual
             }
             ModeRequest::Playback { config } => {
                 config.validate(&self.config)?;
                 let anim = PlaybackAnimator::new();
-                self.mode = StageMode::Playback;
                 self.active_session = Some(CaptureSession::new(
                     anim.total_frames().unwrap_or(0),
                     config,
                 ));
                 self.animator = ActiveAnimator::Playback(anim);
+                StageMode::Playback
             }
-            ModeRequest::OLAT { config } => {
+            ModeRequest::Olat { config } => {
                 config.validate(&self.config)?;
                 let anim = OlatAnimator::new(&self.config);
-                self.mode = StageMode::OLAT;
                 self.active_session = Some(CaptureSession::new(
                     anim.total_frames().unwrap_or(0),
                     config,
                 ));
-                self.animator = ActiveAnimator::OLAT(anim);
+                self.animator = ActiveAnimator::Olat(anim);
+                StageMode::OLAT
             }
+        };
+
+        if self.mode != new_mode {
+            self.mode = new_mode;
+            self.emit_event(StageEvent::ModeChanged(new_mode));
         }
 
         Ok(())
