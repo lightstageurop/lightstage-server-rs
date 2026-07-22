@@ -29,18 +29,15 @@ use crate::{
     state::{StageEvent, StageMode},
 };
 
-/// An inbound websocket request, containing optional request ID
-#[derive(Debug, Clone, Deserialize)]
-pub struct WsRequest {
-    /// Optional request ID, will be echoed by the server
-    pub id: Option<u64>,
-    pub command: WsCommand,
-}
-
-/// Helper to deserialise [`WsRequest::id`] before fully parsing the command.
+/// An inbound websocket request, containing optional request ID.
+///
+/// We purposely leave `command` as an unparsed [`ciborium::Value`],
+/// so that we can deserialise `id` before fully parsing the command.
 #[derive(Debug, Clone, Deserialize)]
 struct WsRawRequest {
+    /// Optional request ID, will be echoed by the server
     pub id: Option<u64>,
+    /// This will be parsed into a [`WsCommand`]
     pub command: Option<ciborium::Value>,
 }
 

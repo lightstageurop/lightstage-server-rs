@@ -24,11 +24,10 @@ pub trait Animator {
     fn total_frames(&self) -> Option<usize>;
 }
 
-#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug)]
 pub enum ActiveAnimator {
     Demo(demo::DemoAnimator),
-    OLAT(olat::OlatAnimator),
+    Olat(olat::OlatAnimator),
     Playback(playback::PlaybackAnimator),
     None,
 }
@@ -37,7 +36,7 @@ impl Animator for ActiveAnimator {
     fn tick(&mut self, renderer: &mut Renderer) -> bool {
         match self {
             Self::Demo(a) => a.tick(renderer),
-            Self::OLAT(a) => a.tick(renderer),
+            Self::Olat(a) => a.tick(renderer),
             Self::Playback(a) => a.tick(renderer),
             Self::None => false,
         }
@@ -46,7 +45,7 @@ impl Animator for ActiveAnimator {
     fn total_frames(&self) -> Option<usize> {
         match self {
             ActiveAnimator::Demo(a) => a.total_frames(),
-            ActiveAnimator::OLAT(a) => a.total_frames(),
+            ActiveAnimator::Olat(a) => a.total_frames(),
             ActiveAnimator::Playback(a) => a.total_frames(),
             ActiveAnimator::None => None,
         }

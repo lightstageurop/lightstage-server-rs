@@ -46,8 +46,13 @@ struct UpdateFixturesRequest {
 pub enum ModeRequest {
     Demo,
     Manual,
-    OLAT { config: CaptureConfig },
-    Playback { config: CaptureConfig },
+    #[serde(rename = "OLAT")]
+    Olat {
+        config: CaptureConfig,
+    },
+    Playback {
+        config: CaptureConfig,
+    },
 }
 
 /// An application service layer if you will to handle updating state.

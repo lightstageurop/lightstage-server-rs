@@ -208,14 +208,14 @@ impl StageState {
                 self.animator = ActiveAnimator::Playback(anim);
                 StageMode::Playback
             }
-            ModeRequest::OLAT { config } => {
+            ModeRequest::Olat { config } => {
                 config.validate(&self.config)?;
                 let anim = OlatAnimator::new(&self.config);
                 self.active_session = Some(CaptureSession::new(
                     anim.total_frames().unwrap_or(0),
                     config,
                 ));
-                self.animator = ActiveAnimator::OLAT(anim);
+                self.animator = ActiveAnimator::Olat(anim);
                 StageMode::OLAT
             }
         };
