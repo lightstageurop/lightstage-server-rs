@@ -1,9 +1,15 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    env,
+    io::IsTerminal,
+    os::fd::AsRawFd,
+    sync::{Arc, RwLock},
+};
 
 use clap::Parser;
+use std::io;
 use tokio::sync::broadcast;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
     config::{CliConfig, ServerConfig},
@@ -41,13 +47,42 @@ impl LightStageFrame {
     }
 }
 
+/// Check if stdout is going to journal
+fn stdout_is_journal_stream() -> bool {
+    let Ok(journal_stream) = env::var("JOURNAL_STREAM") else {
+        return false;
+    };
+
+    unsafe {
+        let mut stat: libc::stat = std::mem::zeroed();
+        if libc::fstat(io::stdout().as_raw_fd(), &raw mut stat) != 0 {
+            return false;
+        }
+        journal_stream == format!("{}:{}", stat.st_dev, stat.st_ino)
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .compact()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
+    // if we can log to journal, do so.
+    let journal_layer = tracing_journald::layer().ok();
+
+    // prevent duplicate logs when running as a systemd service
+    let fmt_layer = if stdout_is_journal_stream() {
+        // stdout would go to journal anyway
+        None
+    } else {
+        let is_tty = io::stdout().is_terminal();
+        Some(tracing_subscriber::fmt::layer().compact().with_ansi(is_tty))
+    };
+
+    // use RUST_LOG var for log level
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    tracing_subscriber::registry()
+        .with(journal_layer)
+        .with(fmt_layer)
+        .with(env_filter)
         .init();
 
     // parse cli args
