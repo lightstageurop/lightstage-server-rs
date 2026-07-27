@@ -10,7 +10,7 @@ use clap::Parser;
 use self_update::cargo_crate_version;
 use std::io;
 use tokio::sync::broadcast;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
@@ -64,7 +64,9 @@ async fn main() -> anyhow::Result<()> {
     let config = ServerConfig::from(CliConfig::parse());
 
     // self_update
-    check_apply_update().await?;
+    if let Err(err) = check_apply_update().await {
+        warn!("Failed to update: {err}");
+    }
 
     info!("Starting light stage server..");
 
