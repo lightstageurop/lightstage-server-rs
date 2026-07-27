@@ -21,6 +21,9 @@ use crate::{
     state::{SharedState, StageMode, TickResult},
 };
 
+/// Hashmap key for a PDS: `(arc_index, is_rgb)`
+type PdsKey = (usize, bool);
+
 /// One of our discovered PDS on the network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KinetPowerSupply {
@@ -126,9 +129,7 @@ pub fn discover_pds(port: u16) -> anyhow::Result<Vec<KinetPowerSupply>> {
 /// Map a vec of discovered PDSs for faster lookup.
 ///
 /// key: `(arc_index, is_rgb)`, value: `SocketAddr`
-pub fn map_targets(
-    raw_targets: Vec<KinetPowerSupply>,
-) -> HashMap<(usize, bool), std::net::SocketAddr> {
+pub fn map_targets(raw_targets: Vec<KinetPowerSupply>) -> HashMap<PdsKey, std::net::SocketAddr> {
     raw_targets
         .into_iter()
         .map(|pds| ((pds.arc_index, pds.is_rgb), pds.remote_adr))
@@ -171,7 +172,7 @@ impl NetworkManager {
     }
 
     /// DMX refresh loop
-    fn run(self, socket: &mut UdpSocket, targets: &HashMap<(usize, bool), SocketAddr>) {
+    fn run(self, socket: &mut UdpSocket, targets: &HashMap<PdsKey, SocketAddr>) {
         // Neither ManagementTool nor kinet.py use this, always set to zero. we do, because we can.
         let mut sequence = 0u32;
         let mut packet = vec![0u8; DmxOutHeader::PACKET_SIZE + 512];
