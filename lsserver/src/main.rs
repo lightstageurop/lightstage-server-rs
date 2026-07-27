@@ -55,6 +55,62 @@ impl LightStageFrame {
     }
 }
 
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // tracing_subscriber init
+    init_tracing();
+
+    // parse cli args
+    let config = ServerConfig::from(CliConfig::parse());
+
+    // self_update
+    check_apply_update().await?;
+
+    info!("Starting light stage server..");
+
+    let (tx, _rx) = broadcast::channel(100);
+
+    let mut renderer = Renderer::new(&config);
+    for universe in 0..config.num_arcs {
+        for fixture in 0..config.lights_per_arc {
+            let address = fixtures::DmxAddress::new((fixture * 6 + 1) as u16).unwrap();
+
+            renderer.rgb_fixtures[universe].push(fixtures::RgbFixture::new(address).unwrap());
+
+            renderer.white_fixtures[universe].push(fixtures::WhiteFixture::new(address).unwrap());
+        }
+    }
+    let state: SharedState = Arc::new(RwLock::new(StageState::new(renderer, config, tx.clone())));
+
+    network::NetworkManager::new(state.clone(), config).start()?;
+    api::start_server(config, state.clone()).await;
+
+    Ok(())
+}
+
+fn init_tracing() {
+    // if we can log to journal, do so.
+    let journal_layer = tracing_journald::layer().ok();
+
+    // prevent duplicate logs when running as a systemd service
+    let fmt_layer = if stdout_is_journal_stream() {
+        // stdout would go to journal anyway
+        None
+    } else {
+        let is_tty = io::stdout().is_terminal();
+        Some(tracing_subscriber::fmt::layer().compact().with_ansi(is_tty))
+    };
+
+    // use RUST_LOG var for log level
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    tracing_subscriber::registry()
+        .with(journal_layer)
+        .with(fmt_layer)
+        .with(env_filter)
+        .init();
+}
+
 /// Check if stdout is going to journal
 fn stdout_is_journal_stream() -> bool {
     let Ok(journal_stream) = env::var("JOURNAL_STREAM") else {
@@ -115,57 +171,6 @@ async fn check_apply_update() -> anyhow::Result<()> {
         }
         _ => {}
     }
-
-    Ok(())
-}
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // if we can log to journal, do so.
-    let journal_layer = tracing_journald::layer().ok();
-
-    // prevent duplicate logs when running as a systemd service
-    let fmt_layer = if stdout_is_journal_stream() {
-        // stdout would go to journal anyway
-        None
-    } else {
-        let is_tty = io::stdout().is_terminal();
-        Some(tracing_subscriber::fmt::layer().compact().with_ansi(is_tty))
-    };
-
-    // use RUST_LOG var for log level
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-
-    tracing_subscriber::registry()
-        .with(journal_layer)
-        .with(fmt_layer)
-        .with(env_filter)
-        .init();
-
-    // parse cli args
-    let config = ServerConfig::from(CliConfig::parse());
-
-    check_apply_update().await?;
-
-    info!("Starting light stage server..");
-
-    let (tx, _rx) = broadcast::channel(100);
-
-    let mut renderer = Renderer::new(&config);
-    for universe in 0..config.num_arcs {
-        for fixture in 0..config.lights_per_arc {
-            let address = fixtures::DmxAddress::new((fixture * 6 + 1) as u16).unwrap();
-
-            renderer.rgb_fixtures[universe].push(fixtures::RgbFixture::new(address).unwrap());
-
-            renderer.white_fixtures[universe].push(fixtures::WhiteFixture::new(address).unwrap());
-        }
-    }
-    let state: SharedState = Arc::new(RwLock::new(StageState::new(renderer, config, tx.clone())));
-
-    network::NetworkManager::new(state.clone(), config).start()?;
-
-    api::start_server(config, state.clone()).await;
 
     Ok(())
 }
