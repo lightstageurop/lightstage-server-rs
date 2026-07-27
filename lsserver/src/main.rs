@@ -1,14 +1,16 @@
 use std::{
     env,
     io::IsTerminal,
-    os::fd::AsRawFd,
+    os::{fd::AsRawFd, unix::process::CommandExt},
+    process::{self, Command},
     sync::{Arc, RwLock},
 };
 
 use clap::Parser;
+use self_update::cargo_crate_version;
 use std::io;
 use tokio::sync::broadcast;
-use tracing::info;
+use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
@@ -24,6 +26,12 @@ mod fixtures;
 mod network;
 mod renderer;
 mod state;
+
+// self_update config
+const GITHUB_REPO_OWNER: &str = "lightstageurop";
+const GITHUB_REPO_NAME: &str = "lightstage-server-rs";
+const BIN_NAME: &str = "lsserver";
+const TAG_PREFIX: &str = "lsserver-v";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LightStageFrame {
@@ -62,6 +70,55 @@ fn stdout_is_journal_stream() -> bool {
     }
 }
 
+/// Apply automatic updates from github releases
+async fn check_apply_update() -> anyhow::Result<()> {
+    if cfg!(debug_assertions) || env::var_os("CARGO").is_some() {
+        info!("Running in debug mode or using cargo; skipping self_update.");
+        return Ok(());
+    }
+
+    // capture current binary path, before it is deleted.
+    let exe = env::current_exe()?;
+
+    info!("Checking for updates..");
+    let status = self_update::backends::github::Update::configure()
+        // repo
+        .repo_owner(GITHUB_REPO_OWNER)
+        .repo_name(GITHUB_REPO_NAME)
+        .bin_name(BIN_NAME)
+        .tag_prefix(TAG_PREFIX)
+        // silence except for progress bar, and do not prompt for confirmation
+        .show_download_progress(true)
+        .unattended()
+        // compare with crate version
+        .current_version(cargo_crate_version!())
+        // go
+        .build_async()?
+        .update_async()
+        .await?;
+
+    match status {
+        self_update::VersionStatus::Updated(v) => {
+            info!("Updated to version {v}. Restarting..");
+
+            #[cfg(unix)]
+            {
+                let args: Vec<_> = env::args_os().skip(1).collect();
+                let err = Command::new(exe).args(args).exec();
+                error!("Failed to re-exec process: {err}. Exiting..");
+            }
+
+            process::exit(1);
+        }
+        self_update::VersionStatus::UpToDate(v) => {
+            info!("Already up to date. Version: {v}");
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // if we can log to journal, do so.
@@ -87,6 +144,8 @@ async fn main() -> anyhow::Result<()> {
 
     // parse cli args
     let config = ServerConfig::from(CliConfig::parse());
+
+    check_apply_update().await?;
 
     info!("Starting light stage server..");
 
