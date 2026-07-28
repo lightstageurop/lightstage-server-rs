@@ -16,8 +16,8 @@ use kinetrs::{DmxOutHeader, KinetPacketHeader, KinetPayload, PollPayload, PollRe
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    LightStageFrame,
     config::ServerConfig,
+    renderer::LightStageFrame,
     state::{SharedState, StageMode, TickResult},
 };
 

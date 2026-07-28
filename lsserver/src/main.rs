@@ -33,31 +33,6 @@ const GITHUB_REPO_NAME: &str = "lightstage-server-rs";
 const BIN_NAME: &str = "lsserver";
 const TAG_PREFIX: &str = "lsserver-v";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LightStageFrame {
-    pub rgb_universes: Vec<[u8; 512]>,
-    pub white_universes: Vec<[u8; 512]>,
-}
-
-impl LightStageFrame {
-    #[must_use]
-    pub fn black(num_arcs: usize) -> Self {
-        Self {
-            rgb_universes: vec![[0u8; 512]; num_arcs],
-            white_universes: vec![[0u8; 512]; num_arcs],
-        }
-    }
-
-    pub fn clear(&mut self) {
-        for u in &mut self.rgb_universes {
-            u.fill(0u8);
-        }
-        for u in &mut self.white_universes {
-            u.fill(0u8);
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // tracing_subscriber init

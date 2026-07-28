@@ -11,10 +11,10 @@ use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
 use crate::{
-    LightStageFrame,
     animator::{ActiveAnimator, Animator, DemoAnimator, OlatAnimator, PlaybackAnimator},
     api::ModeRequest,
     config::ServerConfig,
+    renderer::LightStageFrame,
     renderer::Renderer,
 };
 

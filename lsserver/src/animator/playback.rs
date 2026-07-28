@@ -1,4 +1,4 @@
-use crate::{LightStageFrame, animator::Animator};
+use crate::{animator::Animator, renderer::LightStageFrame};
 
 #[derive(Debug, Default)]
 pub struct PlaybackAnimator {
