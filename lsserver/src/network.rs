@@ -3,7 +3,7 @@
 //! Discovery, DMX refreshing and heartbeat listening.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::Cursor,
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     sync::{Arc, RwLock},
@@ -21,21 +21,23 @@ use crate::{
     state::{SharedState, StageMode, TickResult},
 };
 
+/// Hashmap key for a PDS: `(arc_index, is_rgb)`
+type PdsKey = (usize, bool);
+
 /// One of our discovered PDS on the network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KinetPowerSupply {
     pub remote_adr: SocketAddr,
+    pub serial: u32,
     pub arc_index: usize,
     pub is_rgb: bool,
 }
 
-/// Discover PDS on the network with [`kinetrs::KinetPacketHeader::Poll`] and listen for replies.
-pub fn discover_pds(port: u16) -> anyhow::Result<Vec<KinetPowerSupply>> {
+/// Find the correct local IP to bind to when there are multple interfaces
+fn get_local_kinet_ip() -> anyhow::Result<IpAddr> {
     let ifaces = local_ip_address::list_afinet_netifas()?;
 
-    // Find the correct local IP to bind to when there are multple interfaces
-    // TODO this should be in main so we can reused for the refresh dmx thread too.
-    let local_ip = ifaces
+    ifaces
         .into_iter()
         .find_map(|(_, ip)| match ip {
             IpAddr::V4(v4_addr) if v4_addr.octets()[0] == 10 => Some(ip),
@@ -45,9 +47,17 @@ pub fn discover_pds(port: u16) -> anyhow::Result<Vec<KinetPowerSupply>> {
             anyhow!(
                 "No active network interfaces found in 10.0.0.0/8 range. Is ethernet connected?"
             )
-        })?;
+        })
+}
 
-    // Bind to it, instead of 0.0.0.0 which may result in a different interface being used.
+/// Discover PDS on the network with [`kinetrs::KinetPacketHeader::Poll`] and listen for replies.
+pub fn discover_pds(
+    port: u16,
+    num_arcs: usize,
+    max_retries: usize,
+) -> anyhow::Result<Vec<KinetPowerSupply>> {
+    // Bind to specific IP, instead of 0.0.0.0 which may result in a different interface being used.
+    let local_ip = get_local_kinet_ip()?;
     let socket = UdpSocket::bind(SocketAddr::new(local_ip, 0))?;
 
     socket.set_broadcast(true)?;
@@ -65,58 +75,80 @@ pub fn discover_pds(port: u16) -> anyhow::Result<Vec<KinetPowerSupply>> {
     // Serialise and send it
     let mut buf = Vec::new();
     poll_packet.write_to(&mut buf)?;
-    socket.send_to(&buf, SocketAddr::new(Ipv4Addr::BROADCAST.into(), port))?;
+
+    let expected_total = num_arcs * 2;
 
     let mut discovered_targets = Vec::new();
-    let mut buf = [0u8; PollReplyPayload::PACKET_SIZE];
-    let start_time = Instant::now();
+    let mut seen_serials = HashSet::new();
+    let mut recv_buf = [0u8; PollReplyPayload::PACKET_SIZE];
 
-    while start_time.elapsed() < Duration::from_secs(1) {
-        // ignore recv timeouts or other socket errors
-        let Ok((size, _src)) = socket.recv_from(&mut buf) else {
-            continue;
-        };
+    for attempt in 1..=max_retries {
+        socket.send_to(&buf, SocketAddr::new(Ipv4Addr::BROADCAST.into(), port))?;
+        let start_time = Instant::now();
 
-        // serialise the packet or warn and continue
-        let packet = match KinetPacketHeader::read_from(&mut Cursor::new(&mut buf[..size])) {
-            Ok(p) => p,
-            Err(e) => {
-                warn!("Received unparsable network packet: {e:?}");
+        while start_time.elapsed() < Duration::from_millis(500) {
+            // ignore recv timeouts or other socket errors
+            let Ok((size, _src)) = socket.recv_from(&mut recv_buf) else {
                 continue;
-            }
-        };
-
-        // ignore anything that isnt a reply (eg. heartbeat)
-        let KinetPacketHeader::PollReply(reply) = packet else {
-            continue;
-        };
-
-        let label = reply.node_label_as_str().unwrap_or_default();
-        debug!(
-            "Found PDS {:X} at {}. Label: {}",
-            reply.serial, reply.src_ip, label
-        );
-
-        // check and parse our custom label format. "Arc N(C/W)"
-        let label_parts: Vec<&str> = label.split_whitespace().collect(); // eg. ["Arc","0C"]
-        if let [_, identifier] = label_parts.as_slice() {
-            let (is_rgb, num_str) = if let Some(n) = identifier.strip_suffix('C') {
-                (true, n)
-            } else if let Some(n) = identifier.strip_suffix('W') {
-                (false, n)
-            } else {
-                continue; // identifier doesn't end in C or W.
             };
 
-            // try and parse the arc number
-            if let Ok(arc_index) = num_str.parse::<usize>() {
-                // success. push back PDS info
-                discovered_targets.push(KinetPowerSupply {
-                    remote_adr: SocketAddr::new(reply.src_ip.into(), port),
-                    arc_index,
-                    is_rgb,
-                });
+            // serialise the packet or warn and continue
+            let packet = match KinetPacketHeader::read_from(&mut Cursor::new(&mut recv_buf[..size]))
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!("Received unparsable network packet: {e:?}");
+                    continue;
+                }
+            };
+
+            // ignore anything that isnt a reply (eg. heartbeat)
+            let KinetPacketHeader::PollReply(reply) = packet else {
+                continue;
+            };
+
+            if !seen_serials.insert(reply.serial) {
+                continue; // already processed this serial in a previous attempt
             }
+
+            let label = reply.node_label_as_str().unwrap_or_default();
+            debug!(
+                "Found PDS {:X} at {}. Label: '{}'",
+                reply.serial, reply.src_ip, label
+            );
+
+            // check and parse our custom label format. "Arc N(C/W)"
+            let label_parts: Vec<&str> = label.split_whitespace().collect(); // eg. ["Arc","0C"]
+            if let [_, identifier] = label_parts.as_slice() {
+                let (is_rgb, num_str) = if let Some(n) = identifier.strip_suffix('C') {
+                    (true, n)
+                } else if let Some(n) = identifier.strip_suffix('W') {
+                    (false, n)
+                } else {
+                    continue; // identifier doesn't end in C or W.
+                };
+
+                // try and parse the arc number
+                if let Ok(arc_index) = num_str.parse::<usize>() {
+                    // success. push back PDS info
+                    discovered_targets.push(KinetPowerSupply {
+                        remote_adr: SocketAddr::new(reply.src_ip.into(), port),
+                        serial: reply.serial,
+                        arc_index,
+                        is_rgb,
+                    });
+                }
+            }
+        }
+
+        info!(
+            "Discovery attempt {attempt}/{max_retries}: found {}/{} expected PDSs.",
+            discovered_targets.len(),
+            expected_total
+        );
+
+        if discovered_targets.len() >= expected_total {
+            thread::sleep(Duration::from_millis(200));
         }
     }
 
@@ -126,13 +158,71 @@ pub fn discover_pds(port: u16) -> anyhow::Result<Vec<KinetPowerSupply>> {
 /// Map a vec of discovered PDSs for faster lookup.
 ///
 /// key: `(arc_index, is_rgb)`, value: `SocketAddr`
-pub fn map_targets(
+pub fn map_and_validate_targets(
     raw_targets: Vec<KinetPowerSupply>,
-) -> HashMap<(usize, bool), std::net::SocketAddr> {
-    raw_targets
-        .into_iter()
-        .map(|pds| ((pds.arc_index, pds.is_rgb), pds.remote_adr))
-        .collect()
+    num_arcs: usize,
+) -> anyhow::Result<HashMap<PdsKey, KinetPowerSupply>> {
+    let mut targets: HashMap<PdsKey, KinetPowerSupply> = HashMap::new();
+    let mut duplicates = Vec::new();
+    let mut out_of_bounds = Vec::new();
+
+    for pds in raw_targets {
+        if pds.arc_index >= num_arcs {
+            out_of_bounds.push(format!(
+                "Arc {}{} at {} (Serial: {:X}",
+                pds.arc_index,
+                if pds.is_rgb { 'C' } else { 'W' },
+                pds.remote_adr,
+                pds.serial
+            ));
+        }
+
+        let key = (pds.arc_index, pds.is_rgb);
+        if let Some(existing) = targets.insert(key, pds.clone()) {
+            if existing.remote_adr != pds.remote_adr {
+                duplicates.push(format!(
+                    "Arc {}{}: both {} (Serial: {:X}) and {} (Serial: {:X})",
+                    pds.arc_index,
+                    if pds.is_rgb { 'C' } else { 'W' },
+                    existing.remote_adr,
+                    existing.serial,
+                    pds.remote_adr,
+                    pds.serial
+                ));
+            }
+        }
+    }
+
+    if !out_of_bounds.is_empty() {
+        warn!(
+            "Found PDSs with invalid arc indices for configured {num_arcs} arcs: [{}]",
+            out_of_bounds.join(", ")
+        );
+    }
+
+    if !duplicates.is_empty() {
+        anyhow::bail!("Duplicate PDSs detected:\n - {}", duplicates.join("\n - "))
+    }
+
+    let mut missing = Vec::new();
+    for arc in 0..num_arcs {
+        if !targets.contains_key(&(arc, true)) {
+            missing.push(format!("Arc {arc}C"));
+        }
+        if !targets.contains_key(&(arc, false)) {
+            missing.push(format!("Arc {arc}W"));
+        }
+    }
+
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "Could not discover all PDSs. Missing {} required for {num_arcs} arcs: [{}]",
+            missing.len(),
+            missing.join(", ")
+        );
+    }
+
+    Ok(targets)
 }
 
 /// Manages `KiNET` communication
@@ -140,23 +230,38 @@ pub fn map_targets(
 pub struct NetworkManager {
     state: SharedState,
     config: ServerConfig,
-    last_heartbeat: Arc<RwLock<Instant>>,
+    pds_heartbeats: Arc<RwLock<HashMap<u32, Instant>>>,
 }
 
 impl NetworkManager {
+    /// PDS Timeout: 90s interval * 2 + 20s grace period
+    const PDS_TIMEOUT_LIMIT: Duration = Duration::from_secs(200);
+
     pub fn new(state: SharedState, config: ServerConfig) -> Self {
         Self {
             state,
             config,
-            last_heartbeat: Arc::new(RwLock::new(Instant::now())),
+            pds_heartbeats: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     /// Discover PDS, spawn kinet threads
     pub fn start(self) -> anyhow::Result<()> {
-        let raw_targets = discover_pds(self.config.kinet_port)?;
-        let targets = map_targets(raw_targets);
-        info!("Discovered {} power supplies", targets.len());
+        let raw_targets = discover_pds(self.config.kinet_port, self.config.num_arcs, 3)?;
+        let targets = map_and_validate_targets(raw_targets, self.config.num_arcs)?;
+        info!(
+            "Successfully discovered and mapped {} power supplies",
+            targets.len()
+        );
+
+        // initialise heartbeat tracker with only valid targets
+        let now = Instant::now();
+        {
+            let mut hb_lock = self.pds_heartbeats.write().unwrap();
+            for pds in targets.values() {
+                hb_lock.insert(pds.serial, now);
+            }
+        }
 
         self.spawn_heartbeat_monitor();
 
@@ -167,11 +272,19 @@ impl NetworkManager {
     }
 
     pub fn is_healthy(&self) -> bool {
-        self.last_heartbeat.read().unwrap().elapsed() < Duration::from_secs(91)
+        let heartbeats = self.pds_heartbeats.read().unwrap();
+
+        if heartbeats.is_empty() {
+            return false;
+        }
+
+        heartbeats
+            .values()
+            .all(|&last_hb| last_hb.elapsed() <= Self::PDS_TIMEOUT_LIMIT)
     }
 
     /// DMX refresh loop
-    fn run(self, socket: &mut UdpSocket, targets: &HashMap<(usize, bool), SocketAddr>) {
+    fn run(self, socket: &mut UdpSocket, targets: &HashMap<PdsKey, KinetPowerSupply>) {
         // Neither ManagementTool nor kinet.py use this, always set to zero. we do, because we can.
         let mut sequence = 0u32;
         let mut packet = vec![0u8; DmxOutHeader::PACKET_SIZE + 512];
@@ -235,13 +348,21 @@ impl NetworkManager {
             .expect("failed to serialise");
 
             for arc in 0..self.config.num_arcs {
-                if let Some(rgb_addr) = targets.get(&(arc, true)) {
+                if let Some(KinetPowerSupply {
+                    remote_adr: rgb_addr,
+                    ..
+                }) = targets.get(&(arc, true))
+                {
                     packet[DmxOutHeader::PACKET_SIZE..]
                         .copy_from_slice(&current_frame_data.rgb_universes[arc]);
                     let _ = socket.send_to(&packet, rgb_addr);
                 }
 
-                if let Some(white_addr) = targets.get(&(arc, false)) {
+                if let Some(KinetPowerSupply {
+                    remote_adr: white_addr,
+                    ..
+                }) = targets.get(&(arc, false))
+                {
                     packet[DmxOutHeader::PACKET_SIZE..]
                         .copy_from_slice(&current_frame_data.white_universes[arc]);
                     let _ = socket.send_to(&packet, white_addr);
@@ -267,11 +388,9 @@ impl NetworkManager {
     }
 
     fn spawn_heartbeat_monitor(&self) {
-        // TODO actually map each target and keep counter for each
-
-        // received thread
-        let last_hb_receiver = self.last_heartbeat.clone();
         let rx_port = self.config.heartbeat_port;
+
+        let hbs_rx = self.pds_heartbeats.clone();
         thread::spawn(move || {
             // Bind to the port where the power supplies broadcast or echo replies
             let rx_socket = UdpSocket::bind(format!("0.0.0.0:{rx_port}"))
@@ -287,26 +406,38 @@ impl NetworkManager {
                         KinetPacketHeader::read_from(&mut cursor)
                     {
                         debug!("heartbeat: {hb:?}");
-                        let mut lock = last_hb_receiver.write().unwrap();
-                        *lock = Instant::now();
+                        {
+                            let mut lock = hbs_rx.write().unwrap();
+                            if let Some(last_hb) = lock.get_mut(&hb.serial) {
+                                *last_hb = Instant::now();
+                            }
+                        }
                     }
                 }
             }
         });
 
         // watchdog thread
-        let last_hb_watchdog = self.last_heartbeat.clone();
+        let hbs_wd = self.pds_heartbeats.clone();
         thread::spawn(move || {
-            // 90s interval * 2 + 20s grace period
-            let timeout_limit = Duration::from_secs(200);
+            let mut offline = HashSet::new();
+
             loop {
                 thread::sleep(Duration::from_secs(5));
-                let time_since_last = last_hb_watchdog.read().unwrap().elapsed();
-                if time_since_last > timeout_limit {
-                    error!(
-                        "Lost communication with KiNET power supplies! No heartbeats received for over 90 seconds."
-                    );
-                    // TODO update state here or just panic?
+                let heartbeats = hbs_wd.read().unwrap();
+
+                for (&serial, &last_hb) in heartbeats.iter() {
+                    let elapsed = last_hb.elapsed();
+                    if elapsed > Self::PDS_TIMEOUT_LIMIT {
+                        if offline.insert(serial) {
+                            error!(
+                                "Lost communication with PDS {serial:X}! No heartbeats received for over {:?}.",
+                                Self::PDS_TIMEOUT_LIMIT
+                            );
+                        }
+                    } else if offline.remove(&serial) {
+                        info!("PDS {serial:X} has reconnected.");
+                    }
                 }
             }
         });
