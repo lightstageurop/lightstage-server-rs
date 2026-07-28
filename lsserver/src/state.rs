@@ -123,7 +123,7 @@ impl StageState {
             mode: StageMode::default(),
             tx,
             renderer,
-            current_frame: LightStageFrame::black(),
+            current_frame: LightStageFrame::black(config.num_arcs),
             manual_capture_requested: false,
             active_session: None,
             animator: ActiveAnimator::Demo(DemoAnimator::new(0.2, &config)),

@@ -35,22 +35,25 @@ const TAG_PREFIX: &str = "lsserver-v";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LightStageFrame {
-    pub rgb_universes: [[u8; 512]; 12], // TODO dont hard code
-    pub white_universes: [[u8; 512]; 12],
-}
-
-impl Default for LightStageFrame {
-    fn default() -> Self {
-        Self::black()
-    }
+    pub rgb_universes: Vec<[u8; 512]>,
+    pub white_universes: Vec<[u8; 512]>,
 }
 
 impl LightStageFrame {
     #[must_use]
-    pub fn black() -> Self {
+    pub fn black(num_arcs: usize) -> Self {
         Self {
-            rgb_universes: [[0u8; 512]; 12],
-            white_universes: [[0u8; 512]; 12],
+            rgb_universes: vec![[0u8; 512]; num_arcs],
+            white_universes: vec![[0u8; 512]; num_arcs],
+        }
+    }
+
+    pub fn clear(&mut self) {
+        for u in &mut self.rgb_universes {
+            u.fill(0u8);
+        }
+        for u in &mut self.white_universes {
+            u.fill(0u8);
         }
     }
 }

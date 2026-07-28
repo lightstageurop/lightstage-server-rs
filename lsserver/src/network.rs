@@ -293,7 +293,7 @@ impl NetworkManager {
 
         let mut pkt_counter = 0;
         let mut pkts_per_frame = 1;
-        let mut current_frame_data = LightStageFrame::black();
+        let mut current_frame_data = LightStageFrame::black(self.config.num_arcs);
         let mut should_trigger = false;
 
         loop {
