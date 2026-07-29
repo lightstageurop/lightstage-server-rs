@@ -1,0 +1,99 @@
+{
+  "login": {
+    "users": [
+      {
+        "name": "root",
+        "passwd": "${ROOT_PASSWD}",
+        "totp_enabled": false
+      },
+      {
+        "name": "lsserver",
+        "passwd": "${LSSERVER_PASSWD}",
+        "ssh_keys": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPhlG2kGZ+GpNonuiVkMmXU/jLvgQ4GLBkVSdPjwpVHf thomas@thomas-t15p2",
+        "totp_enabled": true,
+        "totp_secret": "${LSSERVER_TOTP_SECRET}"
+      }
+    ]
+  },
+  "hostname": "lightstagepi",
+  "storage": {
+    "files": [
+      {
+        "source_type": "data",
+        "data_content": "%wheel ALL=(ALL:ALL) NOPASSWD: ALL",
+        "path": "/etc/sudoers.d/10-wheel-nopasswd",
+        "mode": "288",
+        "user": "root",
+        "group": "root"
+      },
+      {
+        "source_type": "data",
+        "data_content": "# Make the onboard nic show as 'eno1'.\n# This may need to be edited if changing pi.\n\n[Match]\nMACAddress=b8:27:eb:a0:eb:5e\n\n[Link]\nName=eno1",
+        "path": "/etc/systemd/network/10-eno1.link",
+        "mode": "420",
+        "user": "root",
+        "group": "root"
+      },
+      {
+        "source_type": "data",
+        "data_content": "# Pi doesn't have onboard/slot\n\n[Match]\nOriginalName=*\n\n[Link]\nNamePolicy=keep database path mac\nAlternativeNamesPolicy=database path mac",
+        "path": "/etc/systemd/network/70-predictable.link",
+        "mode": "420",
+        "user": "root",
+        "group": "root"
+      }
+    ]
+  },
+  "language_name": "English (UK)",
+  "language_utf8": true,
+  "network": {
+    "interfaces": [
+      {
+        "name": "eno1",
+        "available_in_initrd": false,
+        "ipv4": {
+          "network_type": "DHCP",
+          "auto_dns_enabled": true,
+          "dns": ""
+        },
+        "ipv6": {
+          "network_type": "DHCP",
+          "auto_dns_enabled": true
+        }
+      },
+      {
+        "name": "enxa0cec8de1d49",
+        "ipv4": {
+          "network_type": "fixed IPv4 Address",
+          "auto_dns_enabled": false,
+          "address": "10.37.211.100",
+          "netmask": "16"
+        }
+      }
+    ]
+  },
+  "package": {
+    "install": [
+      "glibc-locale unzip nano"
+    ]
+  },
+  "systemd": {
+    "units": [
+      {
+        "name": "cockpit.socket",
+        "enabled": "yes"
+      },
+      {
+        "name": "lsserver.service",
+        "enabled": "yes",
+        "contents": "[Unit]\nDescription=Light Stage Server Daemon\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nUser=lsserver\nGroup=lsserver\nWorkingDirectory=/opt/lsserver\nExecStart=/opt/lsserver/lsserver\nRestart=always\nRestartSec=5s\n\nReadWritePaths=/opt/lsserver\n\n[Install]\nWantedBy=multi-user.target"
+      }
+    ]
+  },
+  "keyboard": "English (UK)",
+  "timezone": "Europe/London",
+  "scripts": [
+    "# sudoers\nusermod -aG wheel lsserver",
+    "mkdir /opt/lsserver\nchown -R lsserver:lsserver /opt/lsserver"
+  ]
+}
