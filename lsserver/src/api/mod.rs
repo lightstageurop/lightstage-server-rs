@@ -194,7 +194,7 @@ impl ApiState {
         Ok(self.seq_store.load(id)?.summary(id.to_string()))
     }
 
-    /// Stores a sequence to disk, returning it's [`SequenceSummary`].
+    /// Stores a sequence to disk, returning its [`SequenceSummary`].
     pub fn upload_sequence(&self, sequence: &PlaybackSequence) -> anyhow::Result<SequenceSummary> {
         self.seq_store.save(sequence)
     }

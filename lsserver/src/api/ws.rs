@@ -105,7 +105,7 @@ pub enum WsResponse {
     SequenceList(Vec<SequenceSummary>),
 }
 
-/// Server-broadcast events ent to WebSocket clients.
+/// Server-broadcast events sent to WebSocket clients.
 #[derive(Debug, Clone, Serialize)]
 pub enum WsEvent {
     /// Broadcast when light stage transitions to a new [`StageMode`]

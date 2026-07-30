@@ -144,7 +144,7 @@ impl SequenceStore {
         anyhow::bail!("Sequence id '{id}' not found");
     }
 
-    /// Retrieves summaries for all available sequences in the storge directory [`Self::storage_dir`].
+    /// Retrieves summaries for all available sequences in the storage directory [`Self::storage_dir`].
     pub fn list(&self) -> anyhow::Result<Vec<SequenceSummary>> {
         let mut summaries = Vec::new();
         let mut seen_ids = HashSet::new();
