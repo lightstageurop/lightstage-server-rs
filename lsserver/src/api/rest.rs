@@ -17,7 +17,7 @@
 //! [local-rapidoc]: http://127.0.0.1:8080/api-docs/rapidoc
 //! [local-spec]: http://127.0.0.1:8080/api-docs/openapi.json
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     Json,
@@ -26,6 +26,8 @@ use axum::{
     response::IntoResponse,
     routing::any,
 };
+use axum_cbor::Cbor;
+use serde::Deserialize;
 use tokio::net::TcpListener;
 use tracing::info;
 use ulid::Ulid;
@@ -35,7 +37,11 @@ use utoipa_rapidoc::RapiDoc;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
-    api::{ApiState, ModeRequest, UpdateColourRequest, UpdateFixturesRequest, ws::ws_handler},
+    api::{
+        ApiState, ModeRequest, UpdateColourRequest, UpdateFixturesRequest,
+        sequence::{PlaybackSequence, SequenceStore, SequenceSummary},
+        ws::ws_handler,
+    },
     config::ServerConfig,
     state::{SharedState, StageMode},
 };
@@ -67,6 +73,31 @@ where
     }
 }
 
+#[derive(IntoResponses)]
+pub enum ApiResponses {
+    /// Success
+    #[response(status = StatusCode::OK)]
+    Success,
+    /// Failure
+    #[response(status = StatusCode::BAD_REQUEST)]
+    Failure(String),
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(names("arc_idx"))]
+pub struct ArcIdx(
+    /// arc id
+    pub u8,
+);
+
+#[derive(Deserialize, IntoParams)]
+pub struct ArcLightIdx {
+    /// arc id
+    pub arc_idx: u8,
+    /// light id
+    pub light_idx: u8,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, IntoParams)]
 #[into_params(names("id"))]
 pub struct SequenceId(
@@ -83,8 +114,16 @@ struct ApiDoc;
 /// Starts the REST (and WebSocket) API.
 ///
 /// Creates the [`axum`] router, registers REST and WS endpoints, `OpenAPI` docs.
-pub async fn start_server(config: ServerConfig, state: SharedState) {
-    let api_state = ApiState { state, config };
+pub async fn start_server(
+    config: ServerConfig,
+    state: SharedState,
+    seq_store: SequenceStore,
+) -> anyhow::Result<()> {
+    let api_state = Arc::new(ApiState {
+        state,
+        config: config.clone(),
+        seq_store,
+    });
 
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .route("/ws", any(ws_handler))
@@ -118,8 +157,10 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
     info!("Starting REST API. Listening on http://{addr}");
 
     // serve
-    let listener = TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
+
+    Ok(())
 }
 
 /// Get the server's configuration
@@ -133,8 +174,8 @@ pub async fn start_server(config: ServerConfig, state: SharedState) {
         (status = StatusCode::OK, description = "Get config success", body = ServerConfig)
     )
 )]
-async fn get_config(State(api): State<ApiState>) -> Json<ServerConfig> {
-    Json(api.config)
+async fn get_config(State(api): State<Arc<ApiState>>) -> Json<ServerConfig> {
+    Json(api.config.clone())
 }
 
 /// Get the current operation mode of the light stage.
@@ -148,7 +189,7 @@ async fn get_config(State(api): State<ApiState>) -> Json<ServerConfig> {
         (status = StatusCode::OK, description = "Get mode success", body = StageMode)
     )
 )]
-async fn get_mode(State(api): State<ApiState>) -> Json<StageMode> {
+async fn get_mode(State(api): State<Arc<ApiState>>) -> Json<StageMode> {
     Json(api.get_mode())
 }
 
@@ -160,11 +201,13 @@ async fn get_mode(State(api): State<ApiState>) -> Json<StageMode> {
     path = "/api/mode",
     tag = CONFIG_TAG,
     responses(
-        (status = StatusCode::OK, description = "Set mode success"),
-        (status = StatusCode::BAD_REQUEST, description = "Invalid mode parameters", body = String)
+        ApiResponses
     )
 )]
-async fn set_mode(State(api): State<ApiState>, Json(payload): Json<ModeRequest>) -> ApiResult<()> {
+async fn set_mode(
+    State(api): State<Arc<ApiState>>,
+    Json(payload): Json<ModeRequest>,
+) -> ApiResult<()> {
     api.set_mode(payload)?;
     Ok(())
 }
@@ -180,7 +223,10 @@ async fn set_mode(State(api): State<ApiState>, Json(payload): Json<ModeRequest>)
         (status = StatusCode::OK, description = "Set entire lightstage success")
     )
 )]
-async fn set_lightstage(State(api): State<ApiState>, Json(payload): Json<UpdateColourRequest>) {
+async fn set_lightstage(
+    State(api): State<Arc<ApiState>>,
+    Json(payload): Json<UpdateColourRequest>,
+) {
     api.set_lightstage(payload.rgb, payload.white);
 }
 
@@ -192,19 +238,18 @@ async fn set_lightstage(State(api): State<ApiState>, Json(payload): Json<UpdateC
     path = "/api/manual/arcs/{arc_idx}",
     tag = MANUAL_TAG,
     params(
-        ("arc_idx" = u8, Path, description = "arc id")
+        ArcIdx
     ),
     responses(
-        (status = StatusCode::OK, description = "Set arc success"),
-        (status = StatusCode::BAD_REQUEST, description = "Failure")
+        ApiResponses
     )
 )]
 async fn set_arc(
-    State(api): State<ApiState>,
-    Path(arc_idx): Path<u8>,
+    State(api): State<Arc<ApiState>>,
+    Path(arc_idx): Path<ArcIdx>,
     Json(payload): Json<UpdateColourRequest>,
 ) -> ApiResult<()> {
-    api.set_arc(arc_idx as usize, payload.rgb, payload.white)?;
+    api.set_arc(arc_idx.0 as usize, payload.rgb, payload.white)?;
     Ok(())
 }
 
@@ -216,22 +261,20 @@ async fn set_arc(
     path = "/api/manual/arcs/{arc_idx}/light/{light_idx}",
     tag = MANUAL_TAG,
     params(
-        ("arc_idx" = u8, Path, description = "arc id"),
-        ("light_idx" = u8, Path)
+        ArcLightIdx
     ),
     responses(
-        (status = StatusCode::OK, description = "Set fixture success"),
-        (status = StatusCode::BAD_REQUEST, description = "Failure")
+        ApiResponses
     )
 )]
 async fn set_fixture(
-    State(api): State<ApiState>,
-    Path((arc_idx, light_idx)): Path<(u8, u8)>,
+    State(api): State<Arc<ApiState>>,
+    Path(arc_light): Path<ArcLightIdx>,
     Json(payload): Json<UpdateColourRequest>,
 ) -> ApiResult<()> {
     api.set_fixture(
-        arc_idx as usize,
-        light_idx as usize,
+        arc_light.arc_idx as usize,
+        arc_light.light_idx as usize,
         payload.rgb,
         payload.white,
     )?;
@@ -246,12 +289,11 @@ async fn set_fixture(
     path = "/api/manual/fixtures",
     tag = MANUAL_TAG,
     responses(
-        (status = StatusCode::OK, description = "Set fixtures success"),
-        (status = StatusCode::BAD_REQUEST, description = "Failure")
+        ApiResponses
     )
 )]
 async fn set_fixtures(
-    State(api): State<ApiState>,
+    State(api): State<Arc<ApiState>>,
     Json(payload): Json<Vec<UpdateFixturesRequest>>,
 ) -> ApiResult<()> {
     api.set_fixtures(

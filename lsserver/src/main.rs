@@ -61,7 +61,11 @@ async fn main() -> anyhow::Result<()> {
             renderer.white_fixtures[universe].push(fixtures::WhiteFixture::new(address).unwrap());
         }
     }
-    let state: SharedState = Arc::new(RwLock::new(StageState::new(renderer, config, tx.clone())));
+    let state: SharedState = Arc::new(RwLock::new(StageState::new(
+        renderer,
+        config.clone(),
+        tx.clone(),
+    )));
 
     network::NetworkManager::new(state.clone(), config.clone()).start()?;
     api::start_server(

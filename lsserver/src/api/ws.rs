@@ -145,12 +145,15 @@ impl<E: ToString> From<Result<(), E>> for WsResponse {
 }
 
 /// [`axum`] handler to upgrade incoming WebSocket connections.
-pub async fn ws_handler(ws: WebSocketUpgrade, State(api): State<ApiState>) -> impl IntoResponse {
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(api): State<Arc<ApiState>>,
+) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, api))
 }
 
 /// WebSocket event loop for a connected client.
-async fn handle_socket(mut socket: WebSocket, api: ApiState) {
+async fn handle_socket(mut socket: WebSocket, api: Arc<ApiState>) {
     debug!("Websocket client connected.");
 
     let mut rx = { api.state.read().unwrap() }.tx.subscribe();
@@ -262,7 +265,7 @@ async fn send_message(socket: &mut WebSocket, message: &WsServerMessage) -> anyh
 /// Interpret commands and update underlying state ([`ApiState`]).
 fn execute_command(command: WsCommand, api: &ApiState) -> WsResponse {
     match command {
-        WsCommand::GetConfig => WsResponse::Config(api.config),
+        WsCommand::GetConfig => WsResponse::Config(api.config.clone()),
         WsCommand::GetMode => WsResponse::Mode(api.get_mode()),
         WsCommand::SetMode(mode) => api.set_mode(mode).into(),
         WsCommand::SetFixture {
