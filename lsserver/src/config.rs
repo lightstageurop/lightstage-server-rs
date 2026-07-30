@@ -1,6 +1,9 @@
 //! Light stage server configuration
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
+};
 
 use clap::Parser;
 use serde::Serialize;
@@ -10,7 +13,7 @@ use utoipa::ToSchema;
 ///
 /// We use [`clap`] to auto-generate the cli.
 /// The values from this struct override the defaults of [`ServerConfig`] when given.
-#[derive(Debug, Clone, Copy, Parser)]
+#[derive(Debug, Clone, Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct CliConfig {
     /// Maximum DMX refresh rate (in Hz) [default: 30]
@@ -22,13 +25,16 @@ pub struct CliConfig {
     /// REST API port [default: 8080]
     #[arg(long, short, env = "LSAPI_PORT")]
     pub port: Option<u16>,
+    /// Storage dir for sequence files [default: ./sequences]
+    #[arg(long, short)]
+    pub seq_path: Option<PathBuf>,
 }
 
 /// Configuration parameters for the light stage server.
 ///
 /// Defines physical layout of the arcs/fixtures, network configuration of REST API, `KiNET`, etc.
 /// Not all fields have a corresponding option in [`CliConfig`] (eg. `num_arcs`), this is intentional.
-#[derive(Debug, Clone, Copy, ToSchema, Serialize)]
+#[derive(Debug, Clone, ToSchema, Serialize)]
 pub struct ServerConfig {
     pub num_arcs: usize,
     pub lights_per_arc: usize,
@@ -41,6 +47,9 @@ pub struct ServerConfig {
     pub api_ip: IpAddr,
     /// Axum REST API port
     pub api_port: u16,
+    /// Sequence store path
+    #[schema(value_type = String, example = "./sequences")]
+    pub seq_path: PathBuf,
 }
 
 impl Default for ServerConfig {
@@ -53,6 +62,7 @@ impl Default for ServerConfig {
             refresh_rate_ms: 1_000 / 30, // 40Hz jitters a bit, idk why
             api_ip: Ipv4Addr::UNSPECIFIED.into(),
             api_port: 8080,
+            seq_path: PathBuf::from("./sequences"),
         }
     }
 }
@@ -67,6 +77,7 @@ impl From<CliConfig> for ServerConfig {
                 .map_or(def.refresh_rate_ms, |r| 1_000 / r),
             api_ip: cli.ip.unwrap_or(def.api_ip),
             api_port: cli.port.unwrap_or(def.api_port),
+            seq_path: cli.seq_path.unwrap_or(def.seq_path),
             ..def
         }
     }

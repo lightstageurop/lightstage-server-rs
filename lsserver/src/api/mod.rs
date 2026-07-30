@@ -4,23 +4,27 @@
 //! [WebSocket][crate::api::ws] and [REST][crate::api::rest]
 
 mod rest;
+mod sequence;
 mod ws;
 
 pub use rest::start_server;
+pub use sequence::{PlaybackSequence, SequenceStore, StageFrame};
 
 use serde::{Deserialize, Serialize};
+use ulid::Ulid;
 use utoipa::ToSchema;
 
 use crate::{
+    api::sequence::SequenceSummary,
     config::ServerConfig,
-    state::{CaptureConfig, SharedState, StageMode},
+    state::{CaptureConfig, ModeTransition, SharedState, StageMode},
 };
 
 /// Generic colour of a 3-channel fixture.
 ///
 /// Eg. [`crate::fixtures::RgbFixture`] or [`crate::fixtures::WhiteFixture`]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
-pub struct FixtureColour(u16, u16, u16);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct FixtureColour(pub u16, pub u16, pub u16);
 
 impl From<FixtureColour> for (u16, u16, u16) {
     fn from(c: FixtureColour) -> Self {
@@ -51,7 +55,8 @@ pub enum ModeRequest {
         config: CaptureConfig,
     },
     Playback {
-        config: CaptureConfig,
+        #[schema(value_type = String)]
+        id: Ulid,
     },
 }
 
@@ -63,18 +68,29 @@ pub struct ApiState {
     /// The underlying [`crate::state::StageState`]
     state: SharedState,
     config: ServerConfig,
+    seq_store: SequenceStore,
 }
 
 impl ApiState {
     /// Retrieve current operation mode of the light stage.
     pub fn get_mode(&self) -> StageMode {
-        { self.state.read().unwrap() }.mode
+        self.state.read().unwrap().mode
     }
 
     /// Update the current operation mode of the light stage.
     pub fn set_mode(&self, mode: ModeRequest) -> anyhow::Result<()> {
+        let transition = match mode {
+            ModeRequest::Demo => ModeTransition::Demo,
+            ModeRequest::Manual => ModeTransition::Manual,
+            ModeRequest::Olat { config } => ModeTransition::Olat(config),
+            ModeRequest::Playback { id } => {
+                let sequence = self.seq_store.load(id)?;
+                ModeTransition::Playback(sequence)
+            }
+        };
+
         let mut lock = self.state.write().unwrap();
-        lock.try_transition_to(mode)
+        lock.try_transition_to(transition)
     }
 
     /// Updates colour of a single specified fixture.
@@ -166,5 +182,25 @@ impl ApiState {
 
         lock.manual_capture_requested = true;
         Ok(())
+    }
+
+    /// Get metadata for all sequences available in [`SequenceStore`].
+    pub fn list_sequences(&self) -> anyhow::Result<Vec<SequenceSummary>> {
+        self.seq_store.list()
+    }
+
+    /// Get metadata for a single sequence, by ID ([`Ulid`]).
+    pub fn get_sequence(&self, id: Ulid) -> anyhow::Result<SequenceSummary> {
+        Ok(self.seq_store.load(id)?.summary(id.to_string()))
+    }
+
+    /// Stores a sequence to disk, returning its [`SequenceSummary`].
+    pub fn upload_sequence(&self, sequence: &PlaybackSequence) -> anyhow::Result<SequenceSummary> {
+        self.seq_store.save(sequence)
+    }
+
+    /// Deletes a sequence, by ID ([`Ulid`]).
+    pub fn delete_sequence(&self, id: Ulid) -> anyhow::Result<()> {
+        self.seq_store.delete(id)
     }
 }

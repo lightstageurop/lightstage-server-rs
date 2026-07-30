@@ -14,6 +14,7 @@ use tracing::{error, info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
+    api::SequenceStore,
     config::{CliConfig, ServerConfig},
     renderer::Renderer,
     state::{SharedState, StageState},
@@ -60,10 +61,19 @@ async fn main() -> anyhow::Result<()> {
             renderer.white_fixtures[universe].push(fixtures::WhiteFixture::new(address).unwrap());
         }
     }
-    let state: SharedState = Arc::new(RwLock::new(StageState::new(renderer, config, tx.clone())));
+    let state: SharedState = Arc::new(RwLock::new(StageState::new(
+        renderer,
+        config.clone(),
+        tx.clone(),
+    )));
 
-    network::NetworkManager::new(state.clone(), config).start()?;
-    api::start_server(config, state.clone()).await;
+    network::NetworkManager::new(state.clone(), config.clone()).start()?;
+    api::start_server(
+        config.clone(),
+        state.clone(),
+        SequenceStore::new(config.seq_path)?,
+    )
+    .await?;
 
     Ok(())
 }

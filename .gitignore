@@ -1,1 +1,7 @@
+# build
 /target
+
+# sequences
+sequences/
+*.cbor
+*.cbor.zst

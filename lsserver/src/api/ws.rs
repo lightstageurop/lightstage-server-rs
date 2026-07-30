@@ -13,6 +13,8 @@
 //!
 //! [cbor]: https://cbor.io/
 
+use std::sync::Arc;
+
 use axum::{
     extract::{
         State, WebSocketUpgrade,
@@ -22,9 +24,13 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
+use ulid::Ulid;
 
 use crate::{
-    api::{ApiState, ModeRequest, UpdateColourRequest, UpdateFixturesRequest},
+    api::{
+        ApiState, ModeRequest, UpdateColourRequest, UpdateFixturesRequest,
+        sequence::{PlaybackSequence, SequenceSummary},
+    },
     config::ServerConfig,
     state::{StageEvent, StageMode},
 };
@@ -66,6 +72,10 @@ pub enum WsCommand {
     /// Update multiple fixtures' colours.
     SetFixtures(Vec<UpdateFixturesRequest>),
     ManualTrigger,
+    ListSequences,
+    GetSequence(Ulid),
+    DeleteSequence(Ulid),
+    UploadSequence(PlaybackSequence),
 }
 
 /// Outbound WebSocket message
@@ -89,9 +99,13 @@ pub enum WsResponse {
     Config(ServerConfig),
     /// An error.
     Error { code: WsErrorKind, message: String },
+    /// Metadata for a [`PlaybackSequence`]
+    Sequence(SequenceSummary),
+    /// A list of metadata, representing a number of [`PlaybackSequence`]s.
+    SequenceList(Vec<SequenceSummary>),
 }
 
-/// Server-broadcast events ent to WebSocket clients.
+/// Server-broadcast events sent to WebSocket clients.
 #[derive(Debug, Clone, Serialize)]
 pub enum WsEvent {
     /// Broadcast when light stage transitions to a new [`StageMode`]
@@ -114,6 +128,8 @@ impl From<StageEvent> for WsEvent {
 pub enum WsErrorKind {
     /// The incoming CBOR frame was malformed or failed validation.
     InvalidPayload,
+    /// Command failed to execute
+    CommandFailed,
 }
 
 impl<E: ToString> From<Result<(), E>> for WsResponse {
@@ -129,12 +145,15 @@ impl<E: ToString> From<Result<(), E>> for WsResponse {
 }
 
 /// [`axum`] handler to upgrade incoming WebSocket connections.
-pub async fn ws_handler(ws: WebSocketUpgrade, State(api): State<ApiState>) -> impl IntoResponse {
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(api): State<Arc<ApiState>>,
+) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, api))
 }
 
 /// WebSocket event loop for a connected client.
-async fn handle_socket(mut socket: WebSocket, api: ApiState) {
+async fn handle_socket(mut socket: WebSocket, api: Arc<ApiState>) {
     debug!("Websocket client connected.");
 
     let mut rx = { api.state.read().unwrap() }.tx.subscribe();
@@ -246,7 +265,7 @@ async fn send_message(socket: &mut WebSocket, message: &WsServerMessage) -> anyh
 /// Interpret commands and update underlying state ([`ApiState`]).
 fn execute_command(command: WsCommand, api: &ApiState) -> WsResponse {
     match command {
-        WsCommand::GetConfig => WsResponse::Config(api.config),
+        WsCommand::GetConfig => WsResponse::Config(api.config.clone()),
         WsCommand::GetMode => WsResponse::Mode(api.get_mode()),
         WsCommand::SetMode(mode) => api.set_mode(mode).into(),
         WsCommand::SetFixture {
@@ -271,5 +290,27 @@ fn execute_command(command: WsCommand, api: &ApiState) -> WsResponse {
             WsResponse::Ok
         }
         WsCommand::ManualTrigger => api.trigger_manual().into(),
+        WsCommand::ListSequences => match api.list_sequences() {
+            Ok(list) => WsResponse::SequenceList(list),
+            Err(err) => WsResponse::Error {
+                code: WsErrorKind::CommandFailed,
+                message: err.to_string(),
+            },
+        },
+        WsCommand::GetSequence(seq_id) => match api.get_sequence(seq_id) {
+            Ok(summary) => WsResponse::Sequence(summary),
+            Err(err) => WsResponse::Error {
+                code: WsErrorKind::CommandFailed,
+                message: err.to_string(),
+            },
+        },
+        WsCommand::DeleteSequence(seq_id) => api.delete_sequence(seq_id).into(),
+        WsCommand::UploadSequence(seq) => match api.upload_sequence(&seq) {
+            Ok(summary) => WsResponse::Sequence(summary),
+            Err(err) => WsResponse::Error {
+                code: WsErrorKind::CommandFailed,
+                message: err.to_string(),
+            },
+        },
     }
 }

@@ -12,10 +12,9 @@ use utoipa::ToSchema;
 
 use crate::{
     animator::{ActiveAnimator, Animator, DemoAnimator, OlatAnimator, PlaybackAnimator},
-    api::ModeRequest,
+    api::PlaybackSequence,
     config::ServerConfig,
-    renderer::LightStageFrame,
-    renderer::Renderer,
+    renderer::{LightStageFrame, Renderer},
 };
 
 /// Defines the active operation mode of the light stage.
@@ -43,6 +42,14 @@ pub enum StageEvent {
     ModeChanged(StageMode),
     /// Emitted when an active capture session completes.
     CaptureFinished,
+}
+
+#[derive(Debug, Clone)]
+pub enum ModeTransition {
+    Demo,
+    Manual,
+    Olat(CaptureConfig),
+    Playback(PlaybackSequence),
 }
 
 /// Configuration parameters for a capturing session.
@@ -186,21 +193,24 @@ impl StageState {
     }
 
     /// Transition to a new state
-    pub fn try_transition_to(&mut self, mode_req: ModeRequest) -> anyhow::Result<()> {
-        let new_mode = match mode_req {
-            ModeRequest::Demo => {
+    pub fn try_transition_to(&mut self, transition: ModeTransition) -> anyhow::Result<()> {
+        let new_mode = match transition {
+            ModeTransition::Demo => {
                 self.active_session = None;
                 self.animator = ActiveAnimator::Demo(DemoAnimator::new(0.2, &self.config));
                 StageMode::Demo
             }
-            ModeRequest::Manual => {
+            ModeTransition::Manual => {
                 self.active_session = None;
                 self.animator = ActiveAnimator::None;
                 StageMode::Manual
             }
-            ModeRequest::Playback { config } => {
+            ModeTransition::Playback(sequence) => {
+                let config = CaptureConfig {
+                    capture_hz: sequence.capture_hz,
+                };
                 config.validate(&self.config)?;
-                let anim = PlaybackAnimator::new();
+                let anim = PlaybackAnimator::new(sequence);
                 self.active_session = Some(CaptureSession::new(
                     anim.total_frames().unwrap_or(0),
                     config,
@@ -208,7 +218,7 @@ impl StageState {
                 self.animator = ActiveAnimator::Playback(anim);
                 StageMode::Playback
             }
-            ModeRequest::Olat { config } => {
+            ModeTransition::Olat(config) => {
                 config.validate(&self.config)?;
                 let anim = OlatAnimator::new(&self.config);
                 self.active_session = Some(CaptureSession::new(
