@@ -28,13 +28,21 @@ impl Animator for PlaybackAnimator {
 
         let frame = &self.sequence[self.seq_index];
         for (arc_idx, arc_data) in frame.rgb_fixtures.iter().enumerate() {
-            for (light_idx, rgb) in arc_data.iter().enumerate() {
-                renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
+            if let Some(renderer_arc) = renderer.rgb_fixtures.get_mut(arc_idx) {
+                for (light_idx, rgb) in arc_data.iter().enumerate() {
+                    if let Some(light) = renderer_arc.get_mut(light_idx) {
+                        light.set_color(rgb.0, rgb.1, rgb.2);
+                    }
+                }
             }
         }
         for (arc_idx, arc_data) in frame.white_fixtures.iter().enumerate() {
-            for (light_idx, white) in arc_data.iter().enumerate() {
-                renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
+            if let Some(renderer_arc) = renderer.white_fixtures.get_mut(arc_idx) {
+                for (light_idx, white) in arc_data.iter().enumerate() {
+                    if let Some(light) = renderer_arc.get_mut(light_idx) {
+                        light.set_white(white.0, white.1, white.2);
+                    }
+                }
             }
         }
 
