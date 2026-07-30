@@ -4,14 +4,18 @@
 //! [WebSocket][crate::api::ws] and [REST][crate::api::rest]
 
 mod rest;
+mod sequence;
 mod ws;
 
 pub use rest::start_server;
+pub use sequence::{PlaybackSequence, SequenceStore, StageFrame};
 
 use serde::{Deserialize, Serialize};
+use ulid::Ulid;
 use utoipa::ToSchema;
 
 use crate::{
+    api::sequence::SequenceSummary,
     config::ServerConfig,
     state::{CaptureConfig, SharedState, StageMode},
 };
@@ -51,7 +55,8 @@ pub enum ModeRequest {
         config: CaptureConfig,
     },
     Playback {
-        config: CaptureConfig,
+        #[schema(value_type = String)]
+        id: Ulid,
     },
 }
 
@@ -63,6 +68,7 @@ pub struct ApiState {
     /// The underlying [`crate::state::StageState`]
     state: SharedState,
     config: ServerConfig,
+    seq_store: SequenceStore,
 }
 
 impl ApiState {
@@ -166,5 +172,25 @@ impl ApiState {
 
         lock.manual_capture_requested = true;
         Ok(())
+    }
+
+    /// Get metadata for all sequences available in [`SequenceStore`].
+    pub fn list_sequences(&self) -> anyhow::Result<Vec<SequenceSummary>> {
+        self.seq_store.list()
+    }
+
+    /// Get metadata for a single sequence, by ID ([`Ulid`]).
+    pub fn get_sequence(&self, id: Ulid) -> anyhow::Result<SequenceSummary> {
+        Ok(self.seq_store.load(id)?.summary(id.to_string()))
+    }
+
+    /// Stores a sequence to disk, returning it's [`SequenceSummary`].
+    pub fn upload_sequence(&self, sequence: &PlaybackSequence) -> anyhow::Result<SequenceSummary> {
+        self.seq_store.save(sequence)
+    }
+
+    /// Deletes a sequence, by ID ([`Ulid`]).
+    pub fn delete_sequence(&self, id: Ulid) -> anyhow::Result<()> {
+        self.seq_store.delete(id)
     }
 }
