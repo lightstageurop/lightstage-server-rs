@@ -17,14 +17,14 @@ use utoipa::ToSchema;
 use crate::{
     api::sequence::SequenceSummary,
     config::ServerConfig,
-    state::{CaptureConfig, SharedState, StageMode},
+    state::{CaptureConfig, ModeTransition, SharedState, StageMode},
 };
 
 /// Generic colour of a 3-channel fixture.
 ///
 /// Eg. [`crate::fixtures::RgbFixture`] or [`crate::fixtures::WhiteFixture`]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
-pub struct FixtureColour(u16, u16, u16);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct FixtureColour(pub u16, pub u16, pub u16);
 
 impl From<FixtureColour> for (u16, u16, u16) {
     fn from(c: FixtureColour) -> Self {
@@ -74,13 +74,23 @@ pub struct ApiState {
 impl ApiState {
     /// Retrieve current operation mode of the light stage.
     pub fn get_mode(&self) -> StageMode {
-        { self.state.read().unwrap() }.mode
+        self.state.read().unwrap().mode
     }
 
     /// Update the current operation mode of the light stage.
     pub fn set_mode(&self, mode: ModeRequest) -> anyhow::Result<()> {
+        let transition = match mode {
+            ModeRequest::Demo => ModeTransition::Demo,
+            ModeRequest::Manual => ModeTransition::Manual,
+            ModeRequest::Olat { config } => ModeTransition::Olat(config),
+            ModeRequest::Playback { id } => {
+                let sequence = self.seq_store.load(id)?;
+                ModeTransition::Playback(sequence)
+            }
+        };
+
         let mut lock = self.state.write().unwrap();
-        lock.try_transition_to(mode)
+        lock.try_transition_to(transition)
     }
 
     /// Updates colour of a single specified fixture.
