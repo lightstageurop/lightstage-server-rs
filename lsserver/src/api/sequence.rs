@@ -159,11 +159,10 @@ impl SequenceStore {
                 .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or_default();
-            let lower = file_name.to_lowercase();
 
-            let (id_str, is_zst) = if let Some(id) = lower.strip_suffix(".cbor.zst") {
+            let (id_str, is_zst) = if let Some(id) = file_name.strip_suffix(".cbor.zst") {
                 (id, true)
-            } else if let Some(id) = lower.strip_suffix(".cbor") {
+            } else if let Some(id) = file_name.strip_suffix(".cbor") {
                 (id, false)
             } else {
                 continue; // file doesn't end in .cbor or .cbor.zst
