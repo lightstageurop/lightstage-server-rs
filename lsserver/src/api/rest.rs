@@ -364,7 +364,8 @@ async fn upload_sequence(
     State(api): State<Arc<ApiState>>,
     Cbor(payload): Cbor<PlaybackSequence>,
 ) -> ApiResult<Json<SequenceSummary>> {
-    Ok(Json(api.upload_sequence(&payload)?))
+    let summary = tokio::task::spawn_blocking(move || api.upload_sequence(&payload)).await??;
+    Ok(Json(summary))
 }
 
 /// Delete a sequence
