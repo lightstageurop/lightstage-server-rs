@@ -225,6 +225,49 @@ pub fn map_and_validate_targets(
     Ok(targets)
 }
 
+/// Timing parameters for DMX refresh loop
+///
+/// In playback modes, multiple DMX packets may be sent for each logical animation frame,
+/// however the DMX refresh rate must always stay confined within some limits and remain synchronised
+/// with the requested `capture_hz`.
+#[derive(Debug, Clone, Copy)]
+pub struct FrameTiming {
+    /// Number of DMX refresh packets to be sent before advancing to the next animator frame.
+    pub sub_ticks_per_frame: usize,
+    /// Time between DMX refresh packets
+    pub tick_duration: Duration,
+}
+
+impl FrameTiming {
+    /// Computes and returns a new [`FrameTiming`] struct for current [`StageMode`].
+    ///
+    /// [`StageMode::Playback`] and [`StageMode::OLAT`] synchronise frame advancement to requested `capture_hz`,
+    /// but may have multiple `sub_ticks_per_frame`, if possible while staying under `base_refresh_ms`.
+    pub fn calculate(base_refresh_ms: u64, mode: StageMode, capture_hz: Option<f64>) -> Self {
+        let refresh_time = Duration::from_millis(base_refresh_ms);
+
+        match mode {
+            StageMode::Demo | StageMode::Manual => Self {
+                sub_ticks_per_frame: 1,
+                tick_duration: refresh_time,
+            },
+            StageMode::Playback | StageMode::OLAT => {
+                // find max network ticks per frame update
+                let max_network_hz = 1000.0 / base_refresh_ms as f64;
+                let hz = capture_hz.unwrap_or(max_network_hz);
+                let sub_ticks_per_frame = (max_network_hz / hz).floor().max(1.0) as usize;
+                // real network refresh rate synced with capture_hz
+                let real_network_hz = (hz * sub_ticks_per_frame as f64).min(max_network_hz);
+                let refresh_time = Duration::from_secs_f64(1.0 / (real_network_hz));
+                Self {
+                    sub_ticks_per_frame,
+                    tick_duration: refresh_time,
+                }
+            }
+        }
+    }
+}
+
 /// Manages `KiNET` communication
 #[derive(Debug)]
 pub struct NetworkManager {
@@ -288,11 +331,11 @@ impl NetworkManager {
         // Neither ManagementTool nor kinet.py use this, always set to zero. we do, because we can.
         let mut sequence = 0u32;
         let mut packet = vec![0u8; DmxOutHeader::PACKET_SIZE + 512];
+
         let mut next_time = Instant::now();
-        let mut refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
+        let mut timing = FrameTiming::calculate(self.config.refresh_rate_ms, StageMode::Demo, None);
 
         let mut pkt_counter = 0;
-        let mut pkts_per_frame = 1;
         let mut current_frame_data = LightStageFrame::black(self.config.num_arcs);
         let mut should_trigger = false;
 
@@ -308,21 +351,7 @@ impl NetworkManager {
                 };
 
                 // set synced refresh rate
-                match mode {
-                    StageMode::Demo | StageMode::Manual => {
-                        pkts_per_frame = 1;
-                        refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
-                    }
-                    StageMode::Playback | StageMode::OLAT => {
-                        // find max network ticks per frame update
-                        let max_network_hz = 1000.0 / self.config.refresh_rate_ms as f64;
-                        let hz = capture_hz.unwrap_or(max_network_hz);
-                        pkts_per_frame = (max_network_hz / hz).floor().max(1.0) as usize;
-                        // real network refresh rate synced with capture_hz
-                        let real_network_hz = (hz * pkts_per_frame as f64).min(max_network_hz);
-                        refresh_time = Duration::from_secs_f64(1.0 / (real_network_hz));
-                    }
-                }
+                timing = FrameTiming::calculate(self.config.refresh_rate_ms, mode, capture_hz);
 
                 // TODO fire cameras from the last frame before we send the new frame
                 if should_trigger {
@@ -335,7 +364,7 @@ impl NetworkManager {
             }
 
             pkt_counter += 1;
-            if pkt_counter >= pkts_per_frame {
+            if pkt_counter >= timing.sub_ticks_per_frame {
                 pkt_counter = 0;
             }
 
@@ -371,16 +400,16 @@ impl NetworkManager {
 
             sequence = sequence.wrapping_add(1);
 
-            next_time += refresh_time;
+            next_time += timing.tick_duration;
             let now = Instant::now();
             if next_time > now {
                 thread::sleep(next_time - now);
             } else {
                 let lateness =
-                    now.duration_since(next_time.checked_sub(refresh_time).unwrap_or(now));
+                    now.duration_since(next_time.checked_sub(timing.tick_duration).unwrap_or(now));
                 warn!(
                     "oops. frame took {lateness:?} (Target was {:?})",
-                    refresh_time
+                    timing.tick_duration
                 );
                 next_time = now;
             }
