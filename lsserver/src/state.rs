@@ -180,7 +180,9 @@ impl StageState {
                 }
             } else {
                 // sequence ended. transition to idle
-                self.emit_event(StageEvent::CaptureFinished);
+                if self.active_session.is_some() {
+                    self.emit_event(StageEvent::CaptureFinished);
+                }
                 self.transition_to_demo();
                 dest.clone_from(&self.current_frame);
                 TickResult::Finished
