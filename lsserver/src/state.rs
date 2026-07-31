@@ -143,7 +143,7 @@ enum RuntimeMode {
 
 impl RuntimeMode {
     /// Map internal runtime state to public-facing [`StageMode`]
-    pub fn stage_mode(&self) -> StageMode {
+    fn stage_mode(&self) -> StageMode {
         match self {
             Self::Demo { .. } => StageMode::Demo,
             Self::Manual { .. } => StageMode::Manual,
