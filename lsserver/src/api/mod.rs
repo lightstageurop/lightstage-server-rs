@@ -171,17 +171,7 @@ impl ApiState {
     ///
     /// Will error if not in manual mode, or trigger already pending.
     pub fn trigger_manual(&self) -> anyhow::Result<()> {
-        let mut lock = self.state.write().unwrap();
-
-        if lock.mode() != StageMode::Manual {
-            anyhow::bail!("Manual trigger only available in manual mode");
-        }
-        if lock.manual_capture_requested {
-            anyhow::bail!("Manual trigger already pending");
-        }
-
-        lock.manual_capture_requested = true;
-        Ok(())
+        self.state.write().unwrap().request_manual_capture()
     }
 
     /// Get metadata for all sequences available in [`SequenceStore`].

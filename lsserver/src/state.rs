@@ -112,7 +112,7 @@ pub struct StageState {
     /// Current frame for [`StageMode::Manual`]
     current_frame: LightStageFrame,
     /// Trigger queued for [`StageMode::Manual`]?
-    pub manual_capture_requested: bool,
+    manual_capture_requested: bool,
     /// Currently active capture session
     active_session: Option<CaptureSession>,
     /// Currently active animator
@@ -354,6 +354,17 @@ impl StageState {
                 }
             }
         });
+    }
+
+    pub fn request_manual_capture(&mut self) -> anyhow::Result<()> {
+        if self.mode != StageMode::Manual {
+            anyhow::bail!("Manual trigger only available in manual mode");
+        }
+        if self.manual_capture_requested {
+            anyhow::bail!("Manual trigger already pending");
+        }
+        self.manual_capture_requested = true;
+        Ok(())
     }
 
     /// Commits all pending fixture changes and calls [`crate::renderer::Renderer::update`].
