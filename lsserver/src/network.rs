@@ -15,6 +15,9 @@ use anyhow::anyhow;
 use kinetrs::{DmxOutHeader, KinetPacketHeader, KinetPayload, PollPayload, PollReplyPayload};
 use tracing::{debug, error, info, warn};
 
+#[cfg(feature = "gpio")]
+use rppal::gpio::Gpio;
+
 use crate::{
     config::ServerConfig,
     renderer::LightStageFrame,
@@ -416,7 +419,28 @@ impl NetworkManager {
         let mut current_frame = LightStageFrame::black(self.config.num_arcs);
         let mut pending_camera_trigger = false;
 
+        #[cfg(feature = "gpio")]
+        let mut should_trigger = false;
+        #[cfg(feature = "gpio")]
+        let mut pin_turn_off_time: Option<Instant> = None;
+
+        #[cfg(feature = "gpio")]
+        let mut trigger_pin = match Gpio::new().and_then(|gpio| gpio.get(self.config.gpio_pin)) {
+            Ok(pin) => Some(pin.into_output()),
+            Err(_) => None,
+        };
+
         loop {
+            #[cfg(feature = "gpio")]
+            if let Some(off_time) = pin_turn_off_time {
+                if Instant::now() >= off_time {
+                    if let Some(pin) = &mut trigger_pin {
+                        pin.set_low();
+                    }
+                    pin_turn_off_time = None;
+                }
+            }
+
             // only advance animation tick every k network packets
             if sub_tick_counter == 0 {
                 // update current_frame_data and get mode, result.
@@ -431,13 +455,20 @@ impl NetworkManager {
                 timing = FrameTiming::calculate(self.config.refresh_rate_ms, mode, capture_hz);
 
                 // TODO fire cameras from the last frame before we send the new frame
-                if pending_camera_trigger {
-                    // hopefully this is enough time for the fixtures to turn on
-                    thread::sleep(Duration::from_millis(4));
-                    // TODO gpio
-                }
+                #[cfg(feature = "gpio")]
+                {
+                    if should_trigger {
+                        // hopefully this is enough time for the fixtures to turn on
+                        thread::sleep(Duration::from_millis(4));
+                        // TODO gpio
+                        if let Some(pin) = &mut trigger_pin {
+                            pin.set_high();
+                            pin_turn_off_time = Some(Instant::now() + Duration::from_millis(500));
+                        }
+                    }
 
-                pending_camera_trigger = tick_result == TickResult::TriggerCapture;
+                    should_trigger = tick_result == TickResult::TriggerCapture;
+                }
             }
 
             sub_tick_counter += 1;
