@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
 use crate::{
-    animator::{ActiveAnimator, Animator, DemoAnimator, OlatAnimator, PlaybackAnimator},
+    animator::{Animator, DemoAnimator, OlatAnimator, PlaybackAnimator},
     api::PlaybackSequence,
     config::ServerConfig,
     renderer::{LightStageFrame, Renderer},
@@ -44,11 +44,16 @@ pub enum StageEvent {
     CaptureFinished,
 }
 
+/// Requested transition sent from the API layer
 #[derive(Debug, Clone)]
 pub enum ModeTransition {
+    /// Transition to [`StageMode::Demo`]
     Demo,
+    /// Transition to [`StageMode::Manual`]
     Manual,
+    /// Transition to [`StageMode::OLAT`]
     Olat(CaptureConfig),
+    /// Transition to [`StageMode::Playback`]
     Playback(PlaybackSequence),
 }
 
@@ -76,16 +81,21 @@ impl CaptureConfig {
     }
 }
 
-/// Metadata about a capturing session (eg. an OLAT sequence)
+/// Metadata about an active capturing session (eg. for [`StageMode::OLAT`] or [`StageMode::Playback`]).
 #[derive(Debug, Clone)]
 pub struct CaptureSession {
+    /// Index of the frame currently being processed.
     pub current_frame_idx: usize,
+    /// Total frames in the capture session
     pub total_frames: usize,
+    /// Capture timing configuration
     pub config: CaptureConfig,
+    /// Timestamp when the capture was started
     pub started_at: Instant,
 }
 
 impl CaptureSession {
+    /// Returns a new [`CaptureSession`], starting now.
     pub fn new(total_frames: usize, config: CaptureConfig) -> Self {
         Self {
             current_frame_idx: 0,
@@ -96,162 +106,235 @@ impl CaptureSession {
     }
 }
 
+/// Result of [`StageState::advance_tick`]. Defines what [`crate::network::NetworkManager`] should do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TickResult {
+    /// Animator is still running, continue.
     Continue,
+    /// Animator is running and requested cameras to fire
     TriggerCapture,
+    /// Animator has ended
     Finished,
 }
 
-/// Shared lightstage state
+/// Internal execution states for [`StageState`].
+#[derive(Debug)]
+enum RuntimeMode {
+    /// Animator for [`StageMode::Demo`]
+    Demo { animator: DemoAnimator },
+    /// State for [`StageMode::Manual`]
+    Manual {
+        /// Trigger queued for [`StageMode::Manual`]?
+        capture_requested: bool,
+    },
+    /// Animator and capture session for [`StageMode::Playback`]
+    Playback {
+        animator: PlaybackAnimator,
+        /// Currently active capture session
+        session: CaptureSession,
+    },
+    /// Animator and capture session for [`StageMode::OLAT`]
+    Olat {
+        animator: OlatAnimator,
+        /// Currently active capture session
+        session: CaptureSession,
+    },
+}
+
+impl RuntimeMode {
+    /// Map internal runtime state to public-facing [`StageMode`]
+    pub fn stage_mode(&self) -> StageMode {
+        match self {
+            Self::Demo { .. } => StageMode::Demo,
+            Self::Manual { .. } => StageMode::Manual,
+            Self::Playback { .. } => StageMode::Playback,
+            Self::Olat { .. } => StageMode::OLAT,
+        }
+    }
+
+    /// Returns target `capture_hz` if a [`CaptureSession`] is currently running.
+    fn capture_hz(&self) -> Option<f64> {
+        match self {
+            Self::Demo { .. } | Self::Manual { .. } => None,
+            Self::Playback { session, .. } | Self::Olat { session, .. } => {
+                Some(session.config.capture_hz)
+            }
+        }
+    }
+}
+
+/// Shared lightstage state. Single source of truth for rendering, API, network, etc.
+///
+/// Higher level [`crate::api::ApiState`] will call into this to mutate hardware states.
+/// Additionally, [`crate::network::NetworkManager`] will also refer to this for frame data, timings, etc.
 #[derive(Debug)]
 pub struct StageState {
-    mode: StageMode,
+    /// Internal state
+    runtime: RuntimeMode,
+    /// Channel to send async events to.
+    ///
+    /// Can be subscribed to with [`Self::subscribe`].
     tx: broadcast::Sender<StageEvent>,
+    /// Internal rendering engine to write fixture states into [`Self::current_frame`].
     renderer: Renderer,
-    /// Current frame for [`StageMode::Manual`]
+    /// Current rendered frame (a number of DMX universes).
     current_frame: LightStageFrame,
-    /// Trigger queued for [`StageMode::Manual`]?
-    manual_capture_requested: bool,
-    /// Currently active capture session
-    active_session: Option<CaptureSession>,
-    /// Currently active animator
-    animator: ActiveAnimator,
+    /// A copy of the server's config, used for some validation.
     config: ServerConfig,
 }
 
 impl StageState {
+    /// Returns a new [`StageState`], running default demo pattern ([`StageMode::Demo`]).
     pub fn new(
         renderer: Renderer,
         config: ServerConfig,
         tx: broadcast::Sender<StageEvent>,
     ) -> Self {
         Self {
-            mode: StageMode::default(),
             tx,
             renderer,
             current_frame: LightStageFrame::black(config.num_arcs),
-            manual_capture_requested: false,
-            active_session: None,
-            animator: ActiveAnimator::Demo(DemoAnimator::new(0.2, &config)),
+            runtime: RuntimeMode::Demo {
+                animator: DemoAnimator::new(0.2, &config),
+            },
             config,
         }
     }
 
+    /// Helper to broadcast async [`StageEvent`]s.
     fn emit_event(&self, event: StageEvent) {
         let _ = self.tx.send(event);
     }
 
+    /// Returns current [`StageMode`].
     pub fn mode(&self) -> StageMode {
-        self.mode
+        self.runtime.stage_mode()
     }
 
+    /// Subscribe to [`StageEvent`] broadcasts
     pub fn subscribe(&self) -> broadcast::Receiver<StageEvent> {
         self.tx.subscribe()
     }
 
+    /// Returns target capture freq. of active session, if any.
     pub fn capture_hz(&self) -> Option<f64> {
-        self.active_session.as_ref().map(|s| s.config.capture_hz)
+        self.runtime.capture_hz()
     }
 
+    /// Advances the active animator, returns an outcome. See [`TickResult`].
     pub fn advance_tick(&mut self, dest: &mut LightStageFrame) -> TickResult {
-        if self.mode == StageMode::Manual {
+        // manual mode doesn't need to be rendered again here.
+        // simply copy the current frame and check if capture was requested
+        if let RuntimeMode::Manual { capture_requested } = &mut self.runtime {
             dest.clone_from(&self.current_frame);
-            if mem::take(&mut self.manual_capture_requested) {
+            return if mem::take(capture_requested) {
+                TickResult::TriggerCapture
+            } else {
+                TickResult::Continue
+            };
+        }
+
+        let (still_active, is_capture) = match &mut self.runtime {
+            RuntimeMode::Demo { animator } => {
+                Self::tick_animator(animator, None, &mut self.renderer)
+            }
+            RuntimeMode::Playback { animator, session } => {
+                Self::tick_animator(animator, Some(session), &mut self.renderer)
+            }
+            RuntimeMode::Olat { animator, session } => {
+                Self::tick_animator(animator, Some(session), &mut self.renderer)
+            }
+            RuntimeMode::Manual { .. } => unreachable!(),
+        };
+
+        self.commit_and_render();
+        dest.clone_from(&self.current_frame);
+
+        if still_active {
+            if is_capture {
                 TickResult::TriggerCapture
             } else {
                 TickResult::Continue
             }
         } else {
-            let still_active = self.animator.tick(&mut self.renderer);
-            self.commit_and_render();
-
-            if let Some(session) = &mut self.active_session {
-                session.current_frame_idx += 1;
+            // sequence ended. transition to idle (demo mode)
+            if is_capture {
+                self.emit_event(StageEvent::CaptureFinished);
             }
+            self.transition_to_demo();
 
-            if still_active {
-                let trigger = self.mode != StageMode::Demo;
-                dest.clone_from(&self.current_frame);
-                if trigger {
-                    TickResult::TriggerCapture
-                } else {
-                    TickResult::Continue
-                }
-            } else {
-                // sequence ended. transition to idle
-                if self.active_session.is_some() {
-                    self.emit_event(StageEvent::CaptureFinished);
-                }
-                self.transition_to_demo();
-                dest.clone_from(&self.current_frame);
-                TickResult::Finished
-            }
+            TickResult::Finished
         }
     }
 
-    /// Helper to emit a [`StageEvent::ModeChanged`] event on mode change.
-    fn set_mode(&mut self, new_mode: StageMode) {
-        if self.mode != new_mode {
-            self.mode = new_mode;
+    /// Helper to tick an animator and return `(animator still active, has active capture session)`.
+    fn tick_animator<A: Animator>(
+        animator: &mut A,
+        session: Option<&mut CaptureSession>,
+        renderer: &mut Renderer,
+    ) -> (bool, bool) {
+        let still_active = animator.tick(renderer);
+        let has_session = session.is_some();
+        if let Some(session) = session {
+            session.current_frame_idx += 1;
+        }
+        (still_active, has_session)
+    }
+
+    /// Helper to set new runtime mode and emit a [`StageEvent::ModeChanged`] event on mode change.
+    fn set_runtime(&mut self, new_runtime: RuntimeMode) {
+        let old_mode = self.runtime.stage_mode();
+        let new_mode = new_runtime.stage_mode();
+
+        self.runtime = new_runtime;
+
+        if old_mode != new_mode {
             self.emit_event(StageEvent::ModeChanged(new_mode));
         }
     }
 
-    /// Internal helper for transition to [`StageMode::Manual`]. Can never fail.
+    /// Internal helper for infallible transition to [`StageMode::Manual`].
     fn transition_to_manual(&mut self) {
-        let new_mode = StageMode::Manual;
-        self.active_session = None;
-        self.animator = ActiveAnimator::None;
-        self.set_mode(new_mode);
+        self.set_runtime(RuntimeMode::Manual {
+            capture_requested: false,
+        });
     }
 
-    /// Internal helper for transition to [`StageMode::Demo`]. Can never fail.
+    /// Internal helper for infallible transition to [`StageMode::Demo`].
     fn transition_to_demo(&mut self) {
-        let new_mode = StageMode::Demo;
-        self.active_session = None;
-        self.animator = ActiveAnimator::Demo(DemoAnimator::new(0.2, &self.config));
-        self.set_mode(new_mode);
+        self.set_runtime(RuntimeMode::Demo {
+            animator: DemoAnimator::new(0.2, &self.config),
+        });
     }
 
-    /// Transition to a new state
+    /// Fallible state transition. Validates requested configuration before modifying runtime mode.
     pub fn try_transition_to(&mut self, transition: ModeTransition) -> anyhow::Result<()> {
-        let new_mode = match transition {
+        match transition {
             ModeTransition::Demo => {
                 self.transition_to_demo();
-                None
             }
             ModeTransition::Manual => {
                 self.transition_to_manual();
-                None
             }
             ModeTransition::Playback(sequence) => {
                 let config = CaptureConfig {
                     capture_hz: sequence.capture_hz,
                 };
                 config.validate(&self.config)?;
-                let anim = PlaybackAnimator::new(sequence);
-                self.active_session = Some(CaptureSession::new(
-                    anim.total_frames().unwrap_or(0),
-                    config,
-                ));
-                self.animator = ActiveAnimator::Playback(anim);
-                Some(StageMode::Playback)
+
+                let animator = PlaybackAnimator::new(sequence);
+                let session = CaptureSession::new(animator.total_frames().unwrap_or(0), config);
+
+                self.set_runtime(RuntimeMode::Playback { animator, session });
             }
             ModeTransition::Olat(config) => {
                 config.validate(&self.config)?;
-                let anim = OlatAnimator::new(&self.config);
-                self.active_session = Some(CaptureSession::new(
-                    anim.total_frames().unwrap_or(0),
-                    config,
-                ));
-                self.animator = ActiveAnimator::Olat(anim);
-                Some(StageMode::OLAT)
-            }
-        };
 
-        if let Some(new_mode) = new_mode {
-            self.set_mode(new_mode);
+                let animator = OlatAnimator::new(&self.config);
+                let session = CaptureSession::new(animator.total_frames().unwrap_or(0), config);
+
+                self.set_runtime(RuntimeMode::Olat { animator, session });
+            }
         }
 
         Ok(())
@@ -363,15 +446,19 @@ impl StageState {
         });
     }
 
+    /// Queues triggering a manual capture.
+    ///
+    /// Fails if not in [`StageMode::Manual`] or if trigger is already pending.
     pub fn request_manual_capture(&mut self) -> anyhow::Result<()> {
-        if self.mode != StageMode::Manual {
+        if let RuntimeMode::Manual { capture_requested } = &mut self.runtime {
+            if *capture_requested {
+                anyhow::bail!("Manual trigger already pending");
+            }
+            *capture_requested = true;
+            Ok(())
+        } else {
             anyhow::bail!("Manual trigger only available in manual mode");
         }
-        if self.manual_capture_requested {
-            anyhow::bail!("Manual trigger already pending");
-        }
-        self.manual_capture_requested = true;
-        Ok(())
     }
 
     /// Commits all pending fixture changes and calls [`crate::renderer::Renderer::update`].
