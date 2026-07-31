@@ -73,6 +73,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 #[derive(IntoResponses)]
 pub enum ApiResponses {
     /// Success

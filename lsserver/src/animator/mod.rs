@@ -23,31 +23,3 @@ pub trait Animator {
     /// Returns the total frame count for a fixed-length sequence or none for an infinite loop.
     fn total_frames(&self) -> Option<usize>;
 }
-
-#[derive(Debug)]
-pub enum ActiveAnimator {
-    Demo(demo::DemoAnimator),
-    Olat(olat::OlatAnimator),
-    Playback(playback::PlaybackAnimator),
-    None,
-}
-
-impl Animator for ActiveAnimator {
-    fn tick(&mut self, renderer: &mut Renderer) -> bool {
-        match self {
-            Self::Demo(a) => a.tick(renderer),
-            Self::Olat(a) => a.tick(renderer),
-            Self::Playback(a) => a.tick(renderer),
-            Self::None => false,
-        }
-    }
-
-    fn total_frames(&self) -> Option<usize> {
-        match self {
-            ActiveAnimator::Demo(a) => a.total_frames(),
-            ActiveAnimator::Olat(a) => a.total_frames(),
-            ActiveAnimator::Playback(a) => a.total_frames(),
-            ActiveAnimator::None => None,
-        }
-    }
-}

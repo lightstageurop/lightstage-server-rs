@@ -156,7 +156,7 @@ pub async fn ws_handler(
 async fn handle_socket(mut socket: WebSocket, api: Arc<ApiState>) {
     debug!("Websocket client connected.");
 
-    let mut rx = { api.state.read().unwrap() }.tx.subscribe();
+    let mut rx = api.state.read().unwrap().subscribe();
 
     loop {
         tokio::select! {

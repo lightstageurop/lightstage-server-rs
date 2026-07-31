@@ -225,6 +225,128 @@ pub fn map_and_validate_targets(
     Ok(targets)
 }
 
+/// Timing parameters for DMX refresh loop
+///
+/// In playback modes, multiple DMX packets may be sent for each logical animation frame,
+/// however the DMX refresh rate must always stay confined within some limits and remain synchronised
+/// with the requested `capture_hz`.
+#[derive(Debug, Clone, Copy)]
+pub struct FrameTiming {
+    /// Number of DMX refresh packets to be sent before advancing to the next animator frame.
+    pub sub_ticks_per_frame: usize,
+    /// Time between DMX refresh packets
+    pub tick_duration: Duration,
+}
+
+impl FrameTiming {
+    /// Computes and returns a new [`FrameTiming`] struct for current [`StageMode`].
+    ///
+    /// [`StageMode::Playback`] and [`StageMode::OLAT`] synchronise frame advancement to requested `capture_hz`,
+    /// but may have multiple `sub_ticks_per_frame`, if possible while staying under `base_refresh_ms`.
+    pub fn calculate(base_refresh_ms: u64, mode: StageMode, capture_hz: Option<f64>) -> Self {
+        let refresh_time = Duration::from_millis(base_refresh_ms);
+
+        match mode {
+            StageMode::Demo | StageMode::Manual => Self {
+                sub_ticks_per_frame: 1,
+                tick_duration: refresh_time,
+            },
+            StageMode::Playback | StageMode::OLAT => {
+                // find max network ticks per frame update
+                let max_network_hz = 1000.0 / base_refresh_ms as f64;
+                let hz = capture_hz.unwrap_or(max_network_hz);
+                let sub_ticks_per_frame = (max_network_hz / hz).floor().max(1.0) as usize;
+                // real network refresh rate synced with capture_hz
+                let real_network_hz = (hz * sub_ticks_per_frame as f64).min(max_network_hz);
+                let refresh_time = Duration::from_secs_f64(1.0 / (real_network_hz));
+                Self {
+                    sub_ticks_per_frame,
+                    tick_duration: refresh_time,
+                }
+            }
+        }
+    }
+}
+
+/// Sends DMX packets ([`kinetrs::KinetPacketHeader::DmxOut`]) to all target PDSs.
+#[derive(Debug)]
+pub struct DmxBroadcaster<'a> {
+    socket: &'a UdpSocket,
+    targets: &'a HashMap<PdsKey, KinetPowerSupply>,
+    num_arcs: usize,
+    sequence: u32,
+    packet_buf: Vec<u8>,
+}
+
+impl<'a> DmxBroadcaster<'a> {
+    /// Returns a new [`DmxBroadcaster`].
+    ///
+    /// Uses borrowed udp socket and targets.
+    /// Allocates and reuses a packet buffer large enough to serialise a `DmxOut` packet.
+    pub fn new(
+        socket: &'a UdpSocket,
+        targets: &'a HashMap<PdsKey, KinetPowerSupply>,
+        num_arcs: usize,
+    ) -> Self {
+        Self {
+            socket,
+            targets,
+            num_arcs,
+            sequence: 0,
+            packet_buf: vec![0u8; DmxOutHeader::PACKET_SIZE + 512],
+        }
+    }
+
+    /// Broadcast a complete [`LightStageFrame`].
+    ///
+    /// Serialises and sends a `DmxOut` packet to each target PDS, with its respective DMX universe from the frame.
+    pub fn broadcast_frame(&mut self, frame: &LightStageFrame) {
+        // build header (same for each PDS)
+        let header = KinetPacketHeader::from(DmxOutHeader {
+            // Neither ManagementTool nor kinet.py use this, always set to zero. we do, because we can.
+            sequence: self.sequence,
+            ..Default::default()
+        });
+
+        if header
+            .write_to(&mut Cursor::new(
+                &mut self.packet_buf[0..DmxOutHeader::PACKET_SIZE],
+            ))
+            .is_err()
+        {
+            error!("Failed to serialise DmxOut header!");
+            return;
+        }
+
+        // send universes for each arc
+        for arc in 0..self.num_arcs {
+            // colour PDS
+            if let Some(KinetPowerSupply {
+                remote_adr: rgb_addr,
+                ..
+            }) = self.targets.get(&(arc, true))
+            {
+                self.packet_buf[DmxOutHeader::PACKET_SIZE..]
+                    .copy_from_slice(&frame.rgb_universes[arc]);
+                let _ = self.socket.send_to(&self.packet_buf, rgb_addr);
+            }
+
+            // white PDS
+            if let Some(KinetPowerSupply {
+                remote_adr: white_addr,
+                ..
+            }) = self.targets.get(&(arc, false))
+            {
+                self.packet_buf[DmxOutHeader::PACKET_SIZE..]
+                    .copy_from_slice(&frame.white_universes[arc]);
+                let _ = self.socket.send_to(&self.packet_buf, white_addr);
+            }
+        }
+
+        self.sequence = self.sequence.wrapping_add(1);
+    }
+}
+
 /// Manages `KiNET` communication
 #[derive(Debug)]
 pub struct NetworkManager {
@@ -285,104 +407,61 @@ impl NetworkManager {
 
     /// DMX refresh loop
     fn run(self, socket: &mut UdpSocket, targets: &HashMap<PdsKey, KinetPowerSupply>) {
-        // Neither ManagementTool nor kinet.py use this, always set to zero. we do, because we can.
-        let mut sequence = 0u32;
-        let mut packet = vec![0u8; DmxOutHeader::PACKET_SIZE + 512];
-        let mut next_time = Instant::now();
-        let mut refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
+        let mut broadcaster = DmxBroadcaster::new(socket, targets, self.config.num_arcs);
 
-        let mut pkt_counter = 0;
-        let mut pkts_per_frame = 1;
-        let mut current_frame_data = LightStageFrame::black(self.config.num_arcs);
-        let mut should_trigger = false;
+        let mut next_tick_time = Instant::now();
+        let mut timing = FrameTiming::calculate(self.config.refresh_rate_ms, StageMode::Demo, None);
+
+        let mut sub_tick_counter = 0;
+        let mut current_frame = LightStageFrame::black(self.config.num_arcs);
+        let mut pending_camera_trigger = false;
 
         loop {
             // only advance animation tick every k network packets
-            if pkt_counter == 0 {
+            if sub_tick_counter == 0 {
                 // update current_frame_data and get mode, result.
                 let (tick_result, mode, capture_hz) = {
                     let mut lock = self.state.write().unwrap();
-                    let result = lock.advance_tick(&mut current_frame_data);
-                    let hz = lock.active_session.as_ref().map(|s| s.config.capture_hz);
-                    (result, lock.mode, hz)
+                    let result = lock.advance_tick(&mut current_frame);
+                    let hz = lock.capture_hz();
+                    (result, lock.mode(), hz)
                 };
 
                 // set synced refresh rate
-                match mode {
-                    StageMode::Demo | StageMode::Manual => {
-                        pkts_per_frame = 1;
-                        refresh_time = Duration::from_millis(self.config.refresh_rate_ms);
-                    }
-                    StageMode::Playback | StageMode::OLAT => {
-                        // find max network ticks per frame update
-                        let max_network_hz = 1000.0 / self.config.refresh_rate_ms as f64;
-                        let hz = capture_hz.unwrap_or(max_network_hz);
-                        pkts_per_frame = (max_network_hz / hz).floor().max(1.0) as usize;
-                        // real network refresh rate synced with capture_hz
-                        let real_network_hz = (hz * pkts_per_frame as f64).min(max_network_hz);
-                        refresh_time = Duration::from_secs_f64(1.0 / (real_network_hz));
-                    }
-                }
+                timing = FrameTiming::calculate(self.config.refresh_rate_ms, mode, capture_hz);
 
                 // TODO fire cameras from the last frame before we send the new frame
-                if should_trigger {
+                if pending_camera_trigger {
                     // hopefully this is enough time for the fixtures to turn on
                     thread::sleep(Duration::from_millis(4));
                     // TODO gpio
                 }
 
-                should_trigger = tick_result == TickResult::TriggerCapture;
+                pending_camera_trigger = tick_result == TickResult::TriggerCapture;
             }
 
-            pkt_counter += 1;
-            if pkt_counter >= pkts_per_frame {
-                pkt_counter = 0;
+            sub_tick_counter += 1;
+            if sub_tick_counter >= timing.sub_ticks_per_frame {
+                sub_tick_counter = 0;
             }
 
-            // build header (same for each PDS)
-            KinetPacketHeader::from(DmxOutHeader {
-                sequence,
-                ..Default::default()
-            })
-            .write_to(&mut Cursor::new(&mut packet[0..DmxOutHeader::PACKET_SIZE]))
-            .expect("failed to serialise");
+            broadcaster.broadcast_frame(&current_frame);
 
-            for arc in 0..self.config.num_arcs {
-                if let Some(KinetPowerSupply {
-                    remote_adr: rgb_addr,
-                    ..
-                }) = targets.get(&(arc, true))
-                {
-                    packet[DmxOutHeader::PACKET_SIZE..]
-                        .copy_from_slice(&current_frame_data.rgb_universes[arc]);
-                    let _ = socket.send_to(&packet, rgb_addr);
-                }
-
-                if let Some(KinetPowerSupply {
-                    remote_adr: white_addr,
-                    ..
-                }) = targets.get(&(arc, false))
-                {
-                    packet[DmxOutHeader::PACKET_SIZE..]
-                        .copy_from_slice(&current_frame_data.white_universes[arc]);
-                    let _ = socket.send_to(&packet, white_addr);
-                }
-            }
-
-            sequence = sequence.wrapping_add(1);
-
-            next_time += refresh_time;
+            next_tick_time += timing.tick_duration;
             let now = Instant::now();
-            if next_time > now {
-                thread::sleep(next_time - now);
+            if next_tick_time > now {
+                thread::sleep(next_tick_time - now);
             } else {
-                let lateness =
-                    now.duration_since(next_time.checked_sub(refresh_time).unwrap_or(now));
+                let lateness = now.duration_since(
+                    next_tick_time
+                        .checked_sub(timing.tick_duration)
+                        .unwrap_or(now),
+                );
                 warn!(
                     "oops. frame took {lateness:?} (Target was {:?})",
-                    refresh_time
+                    timing.tick_duration
                 );
-                next_time = now;
+                next_tick_time = now;
             }
         }
     }

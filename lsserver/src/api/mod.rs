@@ -7,6 +7,8 @@ mod rest;
 mod sequence;
 mod ws;
 
+use std::sync::{RwLockReadGuard, RwLockWriteGuard};
+
 pub use rest::start_server;
 pub use sequence::{PlaybackSequence, SequenceStore, StageFrame};
 
@@ -17,7 +19,7 @@ use utoipa::ToSchema;
 use crate::{
     api::sequence::SequenceSummary,
     config::ServerConfig,
-    state::{CaptureConfig, ModeTransition, SharedState, StageMode},
+    state::{CaptureConfig, ModeTransition, SharedState, StageMode, StageState},
 };
 
 /// Generic colour of a 3-channel fixture.
@@ -72,9 +74,17 @@ pub struct ApiState {
 }
 
 impl ApiState {
+    fn read_state(&self) -> RwLockReadGuard<'_, StageState> {
+        self.state.read().unwrap()
+    }
+
+    fn write_state(&self) -> RwLockWriteGuard<'_, StageState> {
+        self.state.write().unwrap()
+    }
+
     /// Retrieve current operation mode of the light stage.
     pub fn get_mode(&self) -> StageMode {
-        self.state.read().unwrap().mode
+        self.read_state().mode()
     }
 
     /// Update the current operation mode of the light stage.
@@ -89,7 +99,7 @@ impl ApiState {
             }
         };
 
-        let mut lock = self.state.write().unwrap();
+        let mut lock = self.write_state();
         lock.try_transition_to(transition)
     }
 
@@ -126,7 +136,7 @@ impl ApiState {
         white: Option<FixtureColour>,
     ) -> anyhow::Result<()> {
         self.config.validate_arc(arc_idx)?;
-        self.state.write().unwrap().update_rgb_and_white_arc(
+        self.write_state().update_rgb_and_white_arc(
             arc_idx,
             rgb.map(Into::into),
             white.map(Into::into),
@@ -171,17 +181,7 @@ impl ApiState {
     ///
     /// Will error if not in manual mode, or trigger already pending.
     pub fn trigger_manual(&self) -> anyhow::Result<()> {
-        let mut lock = self.state.write().unwrap();
-
-        if lock.mode != StageMode::Manual {
-            anyhow::bail!("Manual trigger only available in manual mode");
-        }
-        if lock.manual_capture_requested {
-            anyhow::bail!("Manual trigger already pending");
-        }
-
-        lock.manual_capture_requested = true;
-        Ok(())
+        self.write_state().request_manual_capture()
     }
 
     /// Get metadata for all sequences available in [`SequenceStore`].
