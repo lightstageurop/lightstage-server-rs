@@ -250,6 +250,16 @@ impl StageState {
         Ok(())
     }
 
+    /// Helper to transition to [`StageMode::Manual`], mutate renderer, and render the result.
+    fn with_manual_renderer<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut Renderer),
+    {
+        self.transition_to_manual();
+        f(&mut self.renderer);
+        self.commit_and_render();
+    }
+
     /// Update an rgb and a white fixture as a pair.
     ///
     /// Sets mode to manual.
@@ -260,14 +270,14 @@ impl StageState {
         rgb: Option<(u16, u16, u16)>,
         white: Option<(u16, u16, u16)>,
     ) {
-        self.transition_to_manual();
-        if let Some(rgb) = rgb {
-            self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
-        }
-        if let Some(white) = white {
-            self.renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
-        }
-        self.commit_and_render();
+        self.with_manual_renderer(|renderer| {
+            if let Some(rgb) = rgb {
+                renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
+            }
+            if let Some(white) = white {
+                renderer.white_fixtures[arc_idx][light_idx].set_white(white.0, white.1, white.2);
+            }
+        });
     }
 
     /// Batch update a set of rgb and white fixture pairs.
@@ -284,17 +294,17 @@ impl StageState {
             ),
         >,
     ) {
-        self.transition_to_manual();
-        for (arc_idx, light_idx, rgb, white) in fixtures {
-            if let Some(rgb) = rgb {
-                self.renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
+        self.with_manual_renderer(|renderer| {
+            for (arc_idx, light_idx, rgb, white) in fixtures {
+                if let Some(rgb) = rgb {
+                    renderer.rgb_fixtures[arc_idx][light_idx].set_color(rgb.0, rgb.1, rgb.2);
+                }
+                if let Some(white) = white {
+                    renderer.white_fixtures[arc_idx][light_idx]
+                        .set_white(white.0, white.1, white.2);
+                }
             }
-            if let Some(white) = white {
-                self.renderer.white_fixtures[arc_idx][light_idx]
-                    .set_white(white.0, white.1, white.2);
-            }
-        }
-        self.commit_and_render();
+        });
     }
 
     /// Update rgb and white for an arc.
@@ -306,18 +316,18 @@ impl StageState {
         rgb: Option<(u16, u16, u16)>,
         white: Option<(u16, u16, u16)>,
     ) {
-        self.transition_to_manual();
-        if let Some(rgb) = rgb {
-            for light in &mut self.renderer.rgb_fixtures[arc_idx] {
-                light.set_color(rgb.0, rgb.1, rgb.2);
+        self.with_manual_renderer(|renderer| {
+            if let Some(rgb) = rgb {
+                for light in &mut renderer.rgb_fixtures[arc_idx] {
+                    light.set_color(rgb.0, rgb.1, rgb.2);
+                }
             }
-        }
-        if let Some(white) = white {
-            for light in &mut self.renderer.white_fixtures[arc_idx] {
-                light.set_white(white.0, white.1, white.2);
+            if let Some(white) = white {
+                for light in &mut renderer.white_fixtures[arc_idx] {
+                    light.set_white(white.0, white.1, white.2);
+                }
             }
-        }
-        self.commit_and_render();
+        });
     }
 
     /// Update rgb and white for entire stage.
@@ -328,22 +338,22 @@ impl StageState {
         rgb: Option<(u16, u16, u16)>,
         white: Option<(u16, u16, u16)>,
     ) {
-        self.transition_to_manual();
-        if let Some(rgb) = rgb {
-            for arc in &mut self.renderer.rgb_fixtures {
-                for light in arc {
-                    light.set_color(rgb.0, rgb.1, rgb.2);
+        self.with_manual_renderer(|renderer| {
+            if let Some(rgb) = rgb {
+                for arc in &mut renderer.rgb_fixtures {
+                    for light in arc {
+                        light.set_color(rgb.0, rgb.1, rgb.2);
+                    }
                 }
             }
-        }
-        if let Some(white) = white {
-            for arc in &mut self.renderer.white_fixtures {
-                for light in arc {
-                    light.set_white(white.0, white.1, white.2);
+            if let Some(white) = white {
+                for arc in &mut renderer.white_fixtures {
+                    for light in arc {
+                        light.set_white(white.0, white.1, white.2);
+                    }
                 }
             }
-        }
-        self.commit_and_render();
+        });
     }
 
     /// Commits all pending fixture changes and calls [`crate::renderer::Renderer::update`].
