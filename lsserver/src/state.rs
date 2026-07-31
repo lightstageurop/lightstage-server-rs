@@ -192,32 +192,36 @@ impl StageState {
 
     /// Internal helper for transition to [`StageMode::Manual`]. Can never fail.
     fn transition_to_manual(&mut self) {
-        self.mode = StageMode::Manual;
+        let new_mode = StageMode::Manual;
         self.active_session = None;
         self.animator = ActiveAnimator::None;
-        self.emit_event(StageEvent::ModeChanged(StageMode::Manual));
+        if self.mode != new_mode {
+            self.mode = new_mode;
+            self.emit_event(StageEvent::ModeChanged(StageMode::Manual));
+        }
     }
 
     /// Internal helper for transition to [`StageMode::Demo`]. Can never fail.
     fn transition_to_demo(&mut self) {
-        self.mode = StageMode::Demo;
+        let new_mode = StageMode::Demo;
         self.active_session = None;
         self.animator = ActiveAnimator::Demo(DemoAnimator::new(0.2, &self.config));
-        self.emit_event(StageEvent::ModeChanged(StageMode::Demo));
+        if self.mode != new_mode {
+            self.mode = new_mode;
+            self.emit_event(StageEvent::ModeChanged(StageMode::Demo));
+        }
     }
 
     /// Transition to a new state
     pub fn try_transition_to(&mut self, transition: ModeTransition) -> anyhow::Result<()> {
         let new_mode = match transition {
             ModeTransition::Demo => {
-                self.active_session = None;
-                self.animator = ActiveAnimator::Demo(DemoAnimator::new(0.2, &self.config));
-                StageMode::Demo
+                self.transition_to_demo();
+                None
             }
             ModeTransition::Manual => {
-                self.active_session = None;
-                self.animator = ActiveAnimator::None;
-                StageMode::Manual
+                self.transition_to_manual();
+                None
             }
             ModeTransition::Playback(sequence) => {
                 let config = CaptureConfig {
@@ -230,7 +234,7 @@ impl StageState {
                     config,
                 ));
                 self.animator = ActiveAnimator::Playback(anim);
-                StageMode::Playback
+                Some(StageMode::Playback)
             }
             ModeTransition::Olat(config) => {
                 config.validate(&self.config)?;
@@ -240,13 +244,15 @@ impl StageState {
                     config,
                 ));
                 self.animator = ActiveAnimator::Olat(anim);
-                StageMode::OLAT
+                Some(StageMode::OLAT)
             }
         };
 
-        if self.mode != new_mode {
-            self.mode = new_mode;
-            self.emit_event(StageEvent::ModeChanged(new_mode));
+        if let Some(new_mode) = new_mode {
+            if self.mode != new_mode {
+                self.mode = new_mode;
+                self.emit_event(StageEvent::ModeChanged(new_mode));
+            }
         }
 
         Ok(())
