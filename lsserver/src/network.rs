@@ -268,6 +268,85 @@ impl FrameTiming {
     }
 }
 
+/// Sends DMX packets ([`kinetrs::KinetPacketHeader::DmxOut`]) to all target PDSs.
+#[derive(Debug)]
+pub struct DmxBroadcaster<'a> {
+    socket: &'a UdpSocket,
+    targets: &'a HashMap<PdsKey, KinetPowerSupply>,
+    num_arcs: usize,
+    sequence: u32,
+    packet_buf: Vec<u8>,
+}
+
+impl<'a> DmxBroadcaster<'a> {
+    /// Returns a new [`DmxBroadcaster`].
+    ///
+    /// Uses borrowed udp socket and targets.
+    /// Allocates and reuses a packet buffer large enough to serialise a `DmxOut` packet.
+    pub fn new(
+        socket: &'a UdpSocket,
+        targets: &'a HashMap<PdsKey, KinetPowerSupply>,
+        num_arcs: usize,
+    ) -> Self {
+        Self {
+            socket,
+            targets,
+            num_arcs,
+            sequence: 0,
+            packet_buf: vec![0u8; DmxOutHeader::PACKET_SIZE + 512],
+        }
+    }
+
+    /// Broadcast a complete [`LightStageFrame`].
+    ///
+    /// Serialises and sends a `DmxOut` packet to each target PDS, with its respective DMX universe from the frame.
+    pub fn broadcast_frame(&mut self, frame: &LightStageFrame) {
+        // build header (same for each PDS)
+        let header = KinetPacketHeader::from(DmxOutHeader {
+            // Neither ManagementTool nor kinet.py use this, always set to zero. we do, because we can.
+            sequence: self.sequence,
+            ..Default::default()
+        });
+
+        if header
+            .write_to(&mut Cursor::new(
+                &mut self.packet_buf[0..DmxOutHeader::PACKET_SIZE],
+            ))
+            .is_err()
+        {
+            error!("Failed to serialise DmxOut header!");
+            return;
+        }
+
+        // send universes for each arc
+        for arc in 0..self.num_arcs {
+            // colour PDS
+            if let Some(KinetPowerSupply {
+                remote_adr: rgb_addr,
+                ..
+            }) = self.targets.get(&(arc, true))
+            {
+                self.packet_buf[DmxOutHeader::PACKET_SIZE..]
+                    .copy_from_slice(&frame.rgb_universes[arc]);
+                let _ = self.socket.send_to(&self.packet_buf, rgb_addr);
+            }
+
+            // white PDS
+            if let Some(KinetPowerSupply {
+                remote_adr: white_addr,
+                ..
+            }) = self.targets.get(&(arc, false))
+            {
+                self.packet_buf[DmxOutHeader::PACKET_SIZE..]
+                    .copy_from_slice(&frame.white_universes[arc]);
+                let _ = self.socket.send_to(&self.packet_buf, white_addr);
+            }
+        }
+
+        self.sequence = self.sequence.wrapping_add(1);
+    }
+}
+
 /// Manages `KiNET` communication
 #[derive(Debug)]
 pub struct NetworkManager {
@@ -328,9 +407,7 @@ impl NetworkManager {
 
     /// DMX refresh loop
     fn run(self, socket: &mut UdpSocket, targets: &HashMap<PdsKey, KinetPowerSupply>) {
-        // Neither ManagementTool nor kinet.py use this, always set to zero. we do, because we can.
-        let mut sequence = 0u32;
-        let mut packet = vec![0u8; DmxOutHeader::PACKET_SIZE + 512];
+        let mut broadcaster = DmxBroadcaster::new(socket, targets, self.config.num_arcs);
 
         let mut next_tick_time = Instant::now();
         let mut timing = FrameTiming::calculate(self.config.refresh_rate_ms, StageMode::Demo, None);
@@ -368,37 +445,7 @@ impl NetworkManager {
                 sub_tick_counter = 0;
             }
 
-            // build header (same for each PDS)
-            KinetPacketHeader::from(DmxOutHeader {
-                sequence,
-                ..Default::default()
-            })
-            .write_to(&mut Cursor::new(&mut packet[0..DmxOutHeader::PACKET_SIZE]))
-            .expect("failed to serialise");
-
-            for arc in 0..self.config.num_arcs {
-                if let Some(KinetPowerSupply {
-                    remote_adr: rgb_addr,
-                    ..
-                }) = targets.get(&(arc, true))
-                {
-                    packet[DmxOutHeader::PACKET_SIZE..]
-                        .copy_from_slice(&current_frame.rgb_universes[arc]);
-                    let _ = socket.send_to(&packet, rgb_addr);
-                }
-
-                if let Some(KinetPowerSupply {
-                    remote_adr: white_addr,
-                    ..
-                }) = targets.get(&(arc, false))
-                {
-                    packet[DmxOutHeader::PACKET_SIZE..]
-                        .copy_from_slice(&current_frame.white_universes[arc]);
-                    let _ = socket.send_to(&packet, white_addr);
-                }
-            }
-
-            sequence = sequence.wrapping_add(1);
+            broadcaster.broadcast_frame(&current_frame);
 
             next_tick_time += timing.tick_duration;
             let now = Instant::now();
