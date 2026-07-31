@@ -332,20 +332,20 @@ impl NetworkManager {
         let mut sequence = 0u32;
         let mut packet = vec![0u8; DmxOutHeader::PACKET_SIZE + 512];
 
-        let mut next_time = Instant::now();
+        let mut next_tick_time = Instant::now();
         let mut timing = FrameTiming::calculate(self.config.refresh_rate_ms, StageMode::Demo, None);
 
-        let mut pkt_counter = 0;
-        let mut current_frame_data = LightStageFrame::black(self.config.num_arcs);
-        let mut should_trigger = false;
+        let mut sub_tick_counter = 0;
+        let mut current_frame = LightStageFrame::black(self.config.num_arcs);
+        let mut pending_camera_trigger = false;
 
         loop {
             // only advance animation tick every k network packets
-            if pkt_counter == 0 {
+            if sub_tick_counter == 0 {
                 // update current_frame_data and get mode, result.
                 let (tick_result, mode, capture_hz) = {
                     let mut lock = self.state.write().unwrap();
-                    let result = lock.advance_tick(&mut current_frame_data);
+                    let result = lock.advance_tick(&mut current_frame);
                     let hz = lock.capture_hz();
                     (result, lock.mode(), hz)
                 };
@@ -354,18 +354,18 @@ impl NetworkManager {
                 timing = FrameTiming::calculate(self.config.refresh_rate_ms, mode, capture_hz);
 
                 // TODO fire cameras from the last frame before we send the new frame
-                if should_trigger {
+                if pending_camera_trigger {
                     // hopefully this is enough time for the fixtures to turn on
                     thread::sleep(Duration::from_millis(4));
                     // TODO gpio
                 }
 
-                should_trigger = tick_result == TickResult::TriggerCapture;
+                pending_camera_trigger = tick_result == TickResult::TriggerCapture;
             }
 
-            pkt_counter += 1;
-            if pkt_counter >= timing.sub_ticks_per_frame {
-                pkt_counter = 0;
+            sub_tick_counter += 1;
+            if sub_tick_counter >= timing.sub_ticks_per_frame {
+                sub_tick_counter = 0;
             }
 
             // build header (same for each PDS)
@@ -383,7 +383,7 @@ impl NetworkManager {
                 }) = targets.get(&(arc, true))
                 {
                     packet[DmxOutHeader::PACKET_SIZE..]
-                        .copy_from_slice(&current_frame_data.rgb_universes[arc]);
+                        .copy_from_slice(&current_frame.rgb_universes[arc]);
                     let _ = socket.send_to(&packet, rgb_addr);
                 }
 
@@ -393,25 +393,28 @@ impl NetworkManager {
                 }) = targets.get(&(arc, false))
                 {
                     packet[DmxOutHeader::PACKET_SIZE..]
-                        .copy_from_slice(&current_frame_data.white_universes[arc]);
+                        .copy_from_slice(&current_frame.white_universes[arc]);
                     let _ = socket.send_to(&packet, white_addr);
                 }
             }
 
             sequence = sequence.wrapping_add(1);
 
-            next_time += timing.tick_duration;
+            next_tick_time += timing.tick_duration;
             let now = Instant::now();
-            if next_time > now {
-                thread::sleep(next_time - now);
+            if next_tick_time > now {
+                thread::sleep(next_tick_time - now);
             } else {
-                let lateness =
-                    now.duration_since(next_time.checked_sub(timing.tick_duration).unwrap_or(now));
+                let lateness = now.duration_since(
+                    next_tick_time
+                        .checked_sub(timing.tick_duration)
+                        .unwrap_or(now),
+                );
                 warn!(
                     "oops. frame took {lateness:?} (Target was {:?})",
                     timing.tick_duration
                 );
-                next_time = now;
+                next_tick_time = now;
             }
         }
     }
