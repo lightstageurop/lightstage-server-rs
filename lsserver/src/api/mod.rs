@@ -74,7 +74,7 @@ pub struct ApiState {
 impl ApiState {
     /// Retrieve current operation mode of the light stage.
     pub fn get_mode(&self) -> StageMode {
-        self.state.read().unwrap().mode
+        self.state.read().unwrap().mode()
     }
 
     /// Update the current operation mode of the light stage.
@@ -173,7 +173,7 @@ impl ApiState {
     pub fn trigger_manual(&self) -> anyhow::Result<()> {
         let mut lock = self.state.write().unwrap();
 
-        if lock.mode != StageMode::Manual {
+        if lock.mode() != StageMode::Manual {
             anyhow::bail!("Manual trigger only available in manual mode");
         }
         if lock.manual_capture_requested {

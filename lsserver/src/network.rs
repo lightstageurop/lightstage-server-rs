@@ -303,8 +303,8 @@ impl NetworkManager {
                 let (tick_result, mode, capture_hz) = {
                     let mut lock = self.state.write().unwrap();
                     let result = lock.advance_tick(&mut current_frame_data);
-                    let hz = lock.active_session.as_ref().map(|s| s.config.capture_hz);
-                    (result, lock.mode, hz)
+                    let hz = lock.capture_hz();
+                    (result, lock.mode(), hz)
                 };
 
                 // set synced refresh rate

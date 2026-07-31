@@ -106,15 +106,15 @@ pub enum TickResult {
 /// Shared lightstage state
 #[derive(Debug)]
 pub struct StageState {
-    pub mode: StageMode,
-    pub tx: broadcast::Sender<StageEvent>,
+    mode: StageMode,
+    tx: broadcast::Sender<StageEvent>,
     renderer: Renderer,
     /// Current frame for [`StageMode::Manual`]
-    pub current_frame: LightStageFrame,
+    current_frame: LightStageFrame,
     /// Trigger queued for [`StageMode::Manual`]?
     pub manual_capture_requested: bool,
     /// Currently active capture session
-    pub active_session: Option<CaptureSession>,
+    active_session: Option<CaptureSession>,
     /// Currently active animator
     animator: ActiveAnimator,
     config: ServerConfig,
@@ -140,6 +140,18 @@ impl StageState {
 
     fn emit_event(&self, event: StageEvent) {
         let _ = self.tx.send(event);
+    }
+
+    pub fn mode(&self) -> StageMode {
+        self.mode
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<StageEvent> {
+        self.tx.subscribe()
+    }
+
+    pub fn capture_hz(&self) -> Option<f64> {
+        self.active_session.as_ref().map(|s| s.config.capture_hz)
     }
 
     pub fn advance_tick(&mut self, dest: &mut LightStageFrame) -> TickResult {
