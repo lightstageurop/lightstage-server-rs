@@ -190,15 +190,20 @@ impl StageState {
         }
     }
 
+    /// Helper to emit a [`StageEvent::ModeChanged`] event on mode change.
+    fn set_mode(&mut self, new_mode: StageMode) {
+        if self.mode != new_mode {
+            self.mode = new_mode;
+            self.emit_event(StageEvent::ModeChanged(new_mode));
+        }
+    }
+
     /// Internal helper for transition to [`StageMode::Manual`]. Can never fail.
     fn transition_to_manual(&mut self) {
         let new_mode = StageMode::Manual;
         self.active_session = None;
         self.animator = ActiveAnimator::None;
-        if self.mode != new_mode {
-            self.mode = new_mode;
-            self.emit_event(StageEvent::ModeChanged(StageMode::Manual));
-        }
+        self.set_mode(new_mode);
     }
 
     /// Internal helper for transition to [`StageMode::Demo`]. Can never fail.
@@ -206,10 +211,7 @@ impl StageState {
         let new_mode = StageMode::Demo;
         self.active_session = None;
         self.animator = ActiveAnimator::Demo(DemoAnimator::new(0.2, &self.config));
-        if self.mode != new_mode {
-            self.mode = new_mode;
-            self.emit_event(StageEvent::ModeChanged(StageMode::Demo));
-        }
+        self.set_mode(new_mode);
     }
 
     /// Transition to a new state
@@ -249,10 +251,7 @@ impl StageState {
         };
 
         if let Some(new_mode) = new_mode {
-            if self.mode != new_mode {
-                self.mode = new_mode;
-                self.emit_event(StageEvent::ModeChanged(new_mode));
-            }
+            self.set_mode(new_mode);
         }
 
         Ok(())
