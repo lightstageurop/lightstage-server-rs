@@ -41,6 +41,14 @@
         "mode": "420",
         "user": "root",
         "group": "root"
+      },
+      {
+        "source_type": "data",
+        "data_content": "SUBSYSTEM==\"gpio\", KERNEL=\"gpiochip*\", GROUP=\"gpio\", MODE=\"0660\"\n",
+        "path": "/etc/udev/rules.d/99-gpio.rules",
+        "mode": "420",
+        "user": "root",
+        "group": "root"
       }
     ]
   },
