@@ -10,7 +10,7 @@
 
 [features]
   default = []
-  gpio = ["dep:rppal"]
+  gpio = ["dep:gpiocdev"]
 
 [dependencies]
   anyhow = "1.0.104"
@@ -43,4 +43,4 @@
   zstd = "0.13.3"
 
   # DSLRs
-  rppal = { version = "0.22.1", optional = true }
+  gpiocdev = { version = "0.8.0", optional = true }

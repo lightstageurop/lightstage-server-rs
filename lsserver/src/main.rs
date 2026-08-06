@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
         tx.clone(),
     )));
 
-    network::NetworkManager::new(state.clone(), config.clone()).start()?;
+    network::NetworkManager::new(state.clone(), config.clone())?.start()?;
     api::start_server(
         config.clone(),
         state.clone(),
