@@ -114,6 +114,11 @@ impl KinetPacketHeader {
             }
     }
 
+    /// Serialises a [`KinetPacketHeader`] into the given writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`io::Error`] if writing to `writer` fails.
     pub fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         // Magic is left as BE,
         // the rest of the protocol appears to be LE
@@ -131,6 +136,16 @@ impl KinetPacketHeader {
         Ok(())
     }
 
+    /// Deserialises a [`KinetPacketHeader`] from the given reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`KinetError`] if:
+    /// - An I/O error occurs ([`KinetError::Io`])
+    /// - Magic sequence doesn't match ([`KinetError::InvalidMagic`])
+    /// - Protocol version is not `v1` ([`KinetError::UnsupportedVersion`])
+    /// - Packet type is unknown ([`KinetError::UnknownPacketType`]),
+    /// - or unimplemented ([`KinetError::UnimplementedPacketType`])
     pub fn read_from<R: io::Read>(reader: &mut R) -> Result<Self, KinetError> {
         let mut magic_bytes = [0u8; 4];
         let mut version_bytes = [0u8; 2];

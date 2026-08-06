@@ -16,10 +16,18 @@ pub trait KinetPayload {
     /// For [`KinetPacketHeader::DmxOut`], this **does not** include the DMX512 data.
     const PACKET_SIZE: usize = KinetPacketHeader::HEADER_SIZE + Self::SIZE;
 
-    /// Serialise the payload into writer
+    /// Serialise payload into writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`io::Error`] if writing to `writer` fails.
     fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()>;
 
-    /// Deserialise
+    /// Deserialise payload from reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`io::Error`] if reading from `reader` fails or if payload contains invalid `reserved` fields.
     fn read_from<R: Read>(reader: &mut R) -> io::Result<Self>
     where
         Self: Sized;
@@ -359,6 +367,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn assert_roundtrip<T: KinetPayload + PartialEq + Debug>(original: T) {
         let mut write_buf = Vec::new();
         original.write_to(&mut write_buf).unwrap();
