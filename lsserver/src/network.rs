@@ -15,6 +15,9 @@ use anyhow::anyhow;
 use kinetrs::{DmxOutHeader, KinetPacketHeader, KinetPayload, PollPayload, PollReplyPayload};
 use tracing::{debug, error, info, warn};
 
+#[cfg(feature = "gpio")]
+use gpiocdev::line::Value;
+
 use crate::{
     config::ServerConfig,
     renderer::LightStageFrame,
@@ -353,18 +356,36 @@ pub struct NetworkManager {
     state: SharedState,
     config: ServerConfig,
     pds_heartbeats: Arc<RwLock<HashMap<u32, Instant>>>,
+    #[cfg(feature = "gpio")]
+    trigger_pin: Option<gpiocdev::Request>,
 }
 
 impl NetworkManager {
     /// PDS Timeout: 90s interval * 2 + 20s grace period
     const PDS_TIMEOUT_LIMIT: Duration = Duration::from_secs(200);
 
-    pub fn new(state: SharedState, config: ServerConfig) -> Self {
-        Self {
+    pub fn new(state: SharedState, config: ServerConfig) -> anyhow::Result<Self> {
+        #[cfg(feature = "gpio")]
+        let trigger_pin = if let Some(pin) = config.gpio_pin {
+            Some(
+                gpiocdev::Request::builder()
+                    .on_chip("/dev/gpiochip0")
+                    .with_line(u32::from(pin))
+                    .as_output(Value::Inactive)
+                    .request()?,
+            )
+        } else {
+            warn!("GPIO triggering disabled!");
+            None
+        };
+
+        Ok(Self {
             state,
             config,
             pds_heartbeats: Arc::new(RwLock::new(HashMap::new())),
-        }
+            #[cfg(feature = "gpio")]
+            trigger_pin,
+        })
     }
 
     /// Discover PDS, spawn kinet threads
@@ -414,9 +435,26 @@ impl NetworkManager {
 
         let mut sub_tick_counter = 0;
         let mut current_frame = LightStageFrame::black(self.config.num_arcs);
-        let mut pending_camera_trigger = false;
+
+        #[cfg(feature = "gpio")]
+        let mut should_trigger = false;
+        #[cfg(feature = "gpio")]
+        let mut pin_turn_off_time: Option<Instant> = None;
 
         loop {
+            #[cfg(feature = "gpio")]
+            if let Some(off_time) = pin_turn_off_time {
+                if Instant::now() >= off_time {
+                    if let Some(pin) = &self.trigger_pin {
+                        let pin_num = self.config.gpio_pin.unwrap(); // safe because trigger_pin is Some
+                        if let Err(e) = pin.set_value(u32::from(pin_num), Value::Inactive) {
+                            warn!("Failed to clear GPIO {}: {}", pin_num, e);
+                        }
+                    }
+                    pin_turn_off_time = None;
+                }
+            }
+
             // only advance animation tick every k network packets
             if sub_tick_counter == 0 {
                 // update current_frame_data and get mode, result.
@@ -431,13 +469,23 @@ impl NetworkManager {
                 timing = FrameTiming::calculate(self.config.refresh_rate_ms, mode, capture_hz);
 
                 // TODO fire cameras from the last frame before we send the new frame
-                if pending_camera_trigger {
-                    // hopefully this is enough time for the fixtures to turn on
-                    thread::sleep(Duration::from_millis(4));
-                    // TODO gpio
-                }
+                #[cfg(feature = "gpio")]
+                {
+                    if should_trigger {
+                        // hopefully this is enough time for the fixtures to turn on
+                        thread::sleep(Duration::from_millis(4));
+                        // TODO gpio
+                        if let Some(pin) = &self.trigger_pin {
+                            let pin_num = self.config.gpio_pin.unwrap(); // safe because trigger_pin is Some
+                            if let Err(e) = pin.set_value(u32::from(pin_num), Value::Active) {
+                                warn!("Failed to trigger GPIO {}: {}", pin_num, e);
+                            }
+                            pin_turn_off_time = Some(Instant::now() + Duration::from_millis(500));
+                        }
+                    }
 
-                pending_camera_trigger = tick_result == TickResult::TriggerCapture;
+                    should_trigger = tick_result == TickResult::TriggerCapture;
+                }
             }
 
             sub_tick_counter += 1;

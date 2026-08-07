@@ -28,6 +28,14 @@ pub struct CliConfig {
     /// Storage dir for sequence files [default: ./sequences]
     #[arg(long, short)]
     pub seq_path: Option<PathBuf>,
+    /// GPIO pin to use for triggering DSLRs (BCM numbering) [default: 4]
+    #[arg(long, short)]
+    #[cfg(feature = "gpio")]
+    pub gpio_pin: Option<u8>,
+    /// Disable using GPIO pin [default: false]
+    #[arg(long)]
+    #[cfg(feature = "gpio")]
+    pub no_gpio: bool,
 }
 
 /// Configuration parameters for the light stage server.
@@ -50,6 +58,9 @@ pub struct ServerConfig {
     /// Sequence store path
     #[schema(value_type = String, example = "./sequences")]
     pub seq_path: PathBuf,
+    /// GPIO pin for DSLRs (BCM numbering)
+    #[cfg(feature = "gpio")]
+    pub gpio_pin: Option<u8>,
 }
 
 impl Default for ServerConfig {
@@ -63,6 +74,8 @@ impl Default for ServerConfig {
             api_ip: Ipv4Addr::UNSPECIFIED.into(),
             api_port: 8080,
             seq_path: PathBuf::from("./sequences"),
+            #[cfg(feature = "gpio")]
+            gpio_pin: Some(4),
         }
     }
 }
@@ -71,6 +84,13 @@ impl From<CliConfig> for ServerConfig {
     fn from(cli: CliConfig) -> Self {
         let def = Self::default();
 
+        #[cfg(feature = "gpio")]
+        let gpio_pin = if cli.no_gpio {
+            None
+        } else {
+            cli.gpio_pin.or(def.gpio_pin)
+        };
+
         Self {
             refresh_rate_ms: cli
                 .max_refresh_rate
@@ -78,6 +98,8 @@ impl From<CliConfig> for ServerConfig {
             api_ip: cli.ip.unwrap_or(def.api_ip),
             api_port: cli.port.unwrap_or(def.api_port),
             seq_path: cli.seq_path.unwrap_or(def.seq_path),
+            #[cfg(feature = "gpio")]
+            gpio_pin,
             ..def
         }
     }
