@@ -471,19 +471,6 @@ impl NetworkManager {
                 // TODO fire cameras from the last frame before we send the new frame
                 #[cfg(feature = "gpio")]
                 {
-                    if should_trigger {
-                        // hopefully this is enough time for the fixtures to turn on
-                        thread::sleep(Duration::from_millis(4));
-                        // TODO gpio
-                        if let Some(pin) = &self.trigger_pin {
-                            let pin_num = self.config.gpio_pin.unwrap(); // safe because trigger_pin is Some
-                            if let Err(e) = pin.set_value(u32::from(pin_num), Value::Active) {
-                                warn!("Failed to trigger GPIO {}: {}", pin_num, e);
-                            }
-                            pin_turn_off_time = Some(Instant::now() + Duration::from_millis(500));
-                        }
-                    }
-
                     should_trigger = tick_result == TickResult::TriggerCapture;
                 }
             }
@@ -494,6 +481,20 @@ impl NetworkManager {
             }
 
             broadcaster.broadcast_frame(&current_frame);
+
+            #[cfg(feature = "gpio")]
+            if should_trigger {
+                // hopefully this is enough time for the fixtures to turn on
+                thread::sleep(Duration::from_millis(10));
+                if let Some(pin) = &self.trigger_pin {
+                    let pin_num = self.config.gpio_pin.unwrap(); // safe because trigger_pin is Some
+                    if let Err(e) = pin.set_value(u32::from(pin_num), Value::Active) {
+                        warn!("Failed to trigger GPIO {}: {}", pin_num, e);
+                    }
+                    pin_turn_off_time = Some(Instant::now() + Duration::from_millis(500));
+                    should_trigger = false;
+                }
+            }
 
             next_tick_time += timing.tick_duration;
             let now = Instant::now();
