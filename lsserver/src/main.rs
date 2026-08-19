@@ -1,3 +1,12 @@
+//! # Light Stage Server (`lsserver`)
+//!
+//! Features:
+//! - Automatic updates from GitHub releases using [`self_update`].
+//! - Logging to stdout/journal as applicable.
+//! - [APIs](api) - REST and WebSocket
+//! - `KiNET` communication and DMX packets handled by [`NetworkManager`](network::NetworkManager)
+//! - Hardware state managed by [`StageState`] and DMX universes written by [`Renderer`].
+
 use std::{
     env,
     io::IsTerminal,
@@ -34,6 +43,9 @@ const GITHUB_REPO_NAME: &str = "lightstage-server-rs";
 const BIN_NAME: &str = "lsserver";
 const TAG_PREFIX: &str = "lsserver-v";
 
+/// Entry point
+///
+/// Parses cli, updates, starts kinet loop and APIs, etc.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // tracing_subscriber init
@@ -78,6 +90,9 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Initialises logging subscribers for journald/stdout.
+///
+/// Uses `RUST_LOG` env var to override log level.
 fn init_tracing() {
     // if we can log to journal, do so.
     let journal_layer = tracing_journald::layer().ok();
@@ -116,7 +131,11 @@ fn stdout_is_journal_stream() -> bool {
     }
 }
 
-/// Apply automatic updates from github releases
+/// Apply automatic updates from github releases.
+///
+/// Updates applied in place and current process replaced using `exec`.
+///
+/// Skipped when running a debug build or with `cargo run`.
 async fn check_apply_update() -> anyhow::Result<()> {
     if cfg!(debug_assertions) || env::var_os("CARGO").is_some() {
         info!("Running in debug mode or using cargo; skipping self_update.");

@@ -1,6 +1,13 @@
-//! # `KiNET` communication with PDSs
+//! # `KiNET` Network Management and DMX output.
 //!
-//! Discovery, DMX refreshing and heartbeat listening.
+//! Provides network interaction with Philips Color Kinetics PDSs. Uses reverse-engineered `KiNET` v1 protocol ([`kinetrs`]).
+//!
+//! ## Features
+//! - Dynamic PDS discovery via [`Poll`](kinetrs::KinetPacketHeader::Poll) and [`PollReply`](kinetrs::KinetPacketHeader::PollReply) packets.
+//! - PDSs are mapped using their label (eg. `Arc 0C`, `Arc 0W`, etc.)
+//! - DMX packet refreshing aligned with camera capture frequency (up to 30Hz).
+//! - [Heartbeat](kinetrs::KinetPacketHeader::HeartBeat) monitoring.
+//! - GPIO output for triggering DSLRs.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -30,13 +37,19 @@ type PdsKey = (usize, bool);
 /// One of our discovered PDS on the network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KinetPowerSupply {
+    /// Target address
     pub remote_adr: SocketAddr,
+    /// Hardware serial number of PDS
     pub serial: u32,
+    /// Logical arc index
     pub arc_index: usize,
+    /// `true` for RGB (iColor MR) fixtures, `false` for white (iW MR).
     pub is_rgb: bool,
 }
 
-/// Find the correct local IP to bind to when there are multple interfaces
+/// Find the correct local IP to bind to when there are multiple interfaces.
+///
+/// Resolves any local IP in the range `10.0.0.0/8`.
 fn get_local_kinet_ip() -> anyhow::Result<IpAddr> {
     let ifaces = local_ip_address::list_afinet_netifas()?;
 
@@ -53,7 +66,14 @@ fn get_local_kinet_ip() -> anyhow::Result<IpAddr> {
         })
 }
 
-/// Discover PDS on the network with [`kinetrs::KinetPacketHeader::Poll`] and listen for replies.
+/// Discover Philips PDSs on the network by broadcasting [`Poll`](kinetrs::KinetPacketHeader::Poll) packets and listening for replies.
+///
+/// Parses node labels formatted as `ARC N(C/W)`.
+/// Reattempts discovery `max_retries` times, or until all expected PDSs respond (`num_arcs` * 2).
+///
+/// # Errors
+///
+/// If socket binding fails or packets cannot be transmitted.
 pub fn discover_pds(
     port: u16,
     num_arcs: usize,
@@ -160,7 +180,14 @@ pub fn discover_pds(
 
 /// Map a vec of discovered PDSs for faster lookup.
 ///
+/// Validates all expected PDSs exist (colour and white for `num_arcs`),
+/// detecting OOB indices, missing PDSs or duplicates.
+///
 /// key: `(arc_index, is_rgb)`, value: `SocketAddr`
+///
+/// # Errors
+///
+/// Errors if there are duplicates or missing PDSs.
 pub fn map_and_validate_targets(
     raw_targets: Vec<KinetPowerSupply>,
     num_arcs: usize,
@@ -364,6 +391,13 @@ impl NetworkManager {
     /// PDS Timeout: 90s interval * 2 + 20s grace period
     const PDS_TIMEOUT_LIMIT: Duration = Duration::from_secs(200);
 
+    /// Constructs a new [`NetworkManager`].
+    ///
+    /// Initialises GPIO (if enabled).
+    ///
+    /// # Errors
+    ///
+    /// If GPIO feature is enabled and config has `gpio_pin`, but GPIO line cannot be claimed from kernel.
     pub fn new(state: SharedState, config: ServerConfig) -> anyhow::Result<Self> {
         #[cfg(feature = "gpio")]
         let trigger_pin = if let Some(pin) = config.gpio_pin {
@@ -388,7 +422,7 @@ impl NetworkManager {
         })
     }
 
-    /// Discover PDS, spawn kinet threads
+    /// Discovers PDSs, spawns heartbeat listener and main loop.
     pub fn start(self) -> anyhow::Result<()> {
         let raw_targets = discover_pds(self.config.kinet_port, self.config.num_arcs, 3)?;
         let targets = map_and_validate_targets(raw_targets, self.config.num_arcs)?;
@@ -414,6 +448,7 @@ impl NetworkManager {
         Ok(())
     }
 
+    /// No active PDS has missed heartbeats.
     pub fn is_healthy(&self) -> bool {
         let heartbeats = self.pds_heartbeats.read().unwrap();
 
@@ -426,7 +461,7 @@ impl NetworkManager {
             .all(|&last_hb| last_hb.elapsed() <= Self::PDS_TIMEOUT_LIMIT)
     }
 
-    /// DMX refresh loop
+    /// Main execution loop, driving `KiNET` DMX packet transmission, and GPIO.
     fn run(self, socket: &mut UdpSocket, targets: &HashMap<PdsKey, KinetPowerSupply>) {
         let mut broadcaster = DmxBroadcaster::new(socket, targets, self.config.num_arcs);
 
@@ -515,6 +550,7 @@ impl NetworkManager {
         }
     }
 
+    /// Spawns background threads listening for heartbeat packets.
     fn spawn_heartbeat_monitor(&self) {
         let rx_port = self.config.heartbeat_port;
 
