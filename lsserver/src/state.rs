@@ -1,4 +1,11 @@
-//! Internal light stage state(s)
+//! # Light Stage State Machine
+//!
+//! Defines the central state management ([`StageState`]) for the light stage,
+//! including mode transitions, events, animator frame stepping.
+//!
+//! [`StageState`] serves as the central source of truth for the server.
+//! This connects incoming api requests (via [`ApiState`][crate::api::ApiState])
+//! to the `KiNET` networking loop, [`NetworkManager`][crate::network::NetworkManager].
 
 use std::{
     mem,

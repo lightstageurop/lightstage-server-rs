@@ -1,7 +1,13 @@
-//! # Light Stage API(s)
+//! # Light Stage API
 //!
-//! Curently we provide two ways to interact with the server:
-//! [WebSocket][crate::api::ws] and [REST][crate::api::rest]
+//! Exposes two main interfaces for controlling the light stage:
+//! - [WebSocket][ws] - Preferred transport, provides higher throughput. Used by [`pylightstage`][pylightstage].
+//! - [REST][rest] - Easier to work with directly, though less functionality than WebSocket.
+//!
+//! This provides an application state layer ([`ApiState`]) to decouple
+//! transport endpoints ([`rest`]/[`ws`]) from hardware state ([`StageState`]).
+//!
+//! [pylightstage]: https://github.com/lightstageurop/pylightstage
 
 mod rest;
 mod sequence;
@@ -34,12 +40,14 @@ impl From<FixtureColour> for (u16, u16, u16) {
     }
 }
 
+/// Payload for setting white/colour fixture's intensity.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 struct UpdateColourRequest {
     rgb: Option<FixtureColour>,
     white: Option<FixtureColour>,
 }
 
+/// Payload for setting a specific fixture's intensity.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 struct UpdateFixturesRequest {
     arc_idx: usize,
@@ -47,6 +55,9 @@ struct UpdateFixturesRequest {
     colour: UpdateColourRequest,
 }
 
+/// Payload for changing the stage's mode.
+///
+/// This is used by [`ApiState::set_mode`] to construct a [`ModeTransition`] for [`StageState`].
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type")]
 pub enum ModeRequest {
