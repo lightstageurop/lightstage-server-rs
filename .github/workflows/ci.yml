@@ -24,7 +24,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/setup@v2
         with:
-          version: latest-11
+          version: next-12 # FIXME: npm is dumb and some tags are broken.
           runtime: node@latest
           cache: true
           install: true
