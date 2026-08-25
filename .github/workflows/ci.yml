@@ -12,6 +12,39 @@ permissions:
   contents: write
 
 jobs:
+  build-ui:
+    name: Build Svelte/Vite UI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout UI
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/lightstage-js
+
+      # pnpm/setup doesn't work right now because the npm releases for pnpm v11+ are broken.
+      # TODO: replace actions/setup-node and pnpm/action-setup with only pnpm/setup
+      # in the future sometime when npm becomes not broken (if ever)?
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          cache: true
+          run_install: true
+
+      - name: Install node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: latest
+
+      - name: Build Vite App
+        run: |
+          pnpm build
+
+      - name: Upload UI Assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-dist
+          path: packages/lightstage-ui/dist
+
   test:
     name: Run Workspace Tests
     runs-on: ubuntu-latest
@@ -33,7 +66,7 @@ jobs:
 
   build:
     name: Build and upload lsserver
-    needs: test
+    needs: [test, build-ui]
     runs-on: ubuntu-latest
 
     strategy:
@@ -47,6 +80,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Download UI Assets
+        uses: actions/download-artifact@v8
+        with:
+          name: ui-dist
+          path: lsserver/ui-dist
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -85,6 +124,7 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
+          pattern: lsserver-*.tar.gz
           merge-multiple: true # put all artifacts in same dir
 
       - name: Create release

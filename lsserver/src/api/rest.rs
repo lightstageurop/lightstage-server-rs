@@ -33,7 +33,6 @@ use tracing::info;
 use ulid::Ulid;
 use utoipa::{IntoParams, IntoResponses, OpenApi};
 use utoipa_axum::{router::OpenApiRouter, routes};
-use utoipa_rapidoc::RapiDoc;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
@@ -139,18 +138,27 @@ pub async fn start_server(
         .routes(routes!(get_sequence, delete_sequence))
         .split_for_parts();
 
+    #[cfg(not(debug_assertions))]
+    let apply_ui_fallback = |app: axum::Router<Arc<ApiState>>| {
+        use axum_embed::ServeEmbed;
+        use rust_embed::RustEmbed;
+
+        #[derive(RustEmbed, Clone)]
+        #[folder = "ui-dist"]
+        struct Assets;
+
+        app.fallback_service(ServeEmbed::<Assets>::new())
+    };
+
+    #[cfg(debug_assertions)]
+    let apply_ui_fallback = |app| app;
+
     // host swagger / rapidocs
-    let app = router
-        .merge(SwaggerUi::new("/api-docs/swagger-ui").url("/api-docs/openapi.json", api))
-        // the swagger router is already hosting the openapi spec so we can just do:
-        .merge(RapiDoc::new("/api-docs/openapi.json").path("/api-docs/rapidoc"))
-        // if we drop swagger we would otherwise do:
-        // .merge(RapiDoc::with_url(
-        //     "/rapidoc",
-        //     "/apid-docs/openapi.json",
-        //     api,
-        // ))
-        .with_state(api_state);
+    let app =
+        router.merge(SwaggerUi::new("/api-docs/swagger-ui").url("/api-docs/openapi.json", api));
+
+    let app = apply_ui_fallback(app).with_state(api_state);
+
     // TODO make base path (ie. `/api/`) configurable
 
     // from config
