@@ -24,6 +24,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/setup@v2
         with:
+          version: latest-11
           runtime: node@latest
           cache: true
           install: true
