@@ -21,13 +21,19 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/lightstage-js
 
+      # pnpm/setup doesn't work right now because the npm releases for pnpm v11+ are broken.
+      # TODO: replace actions/setup-node and pnpm/action-setup with only pnpm/setup
+      # in the future sometime when npm becomes not broken (if ever)?
       - name: Install pnpm
-        uses: pnpm/setup@v2
+        uses: pnpm/action-setup@v6
         with:
-          version: next-12 # FIXME: npm is dumb and some tags are broken.
-          runtime: node@latest
           cache: true
-          install: true
+          run_install: true
+
+      - name: Install node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: latest
 
       - name: Build Vite App
         run: |
