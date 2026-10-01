@@ -1,0 +1,8 @@
+# Pi doesn't have onboard/slot
+
+[Match]
+OriginalName=*
+
+[Link]
+NamePolicy=keep database path mac
+AlternativeNamesPolicy=database path mac

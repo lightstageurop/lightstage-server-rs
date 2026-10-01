@@ -1,0 +1,18 @@
+[Unit]
+Description=Light Stage Server Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=lsserver
+Group=lsserver
+WorkingDirectory=/opt/lsserver
+ExecStart=/opt/lsserver/lsserver
+Restart=always
+RestartSec=5s
+
+ReadWritePaths=/opt/lsserver
+
+[Install]
+WantedBy=multi-user.target

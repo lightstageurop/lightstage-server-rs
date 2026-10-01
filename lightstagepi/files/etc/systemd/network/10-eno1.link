@@ -1,0 +1,8 @@
+# Make the onboard nic show as 'eno1'.
+# This may need to be edited if changing pi.
+
+[Match]
+MACAddress=b8:27:eb:a0:eb:5e
+
+[Link]
+Name=eno1
